@@ -1,0 +1,19 @@
+# School Bell Console — scheduler worker
+# Install: copy to /etc/systemd/system/, adjust paths/user, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now bell-worker
+[Unit]
+Description=School Bell Console (scheduler worker)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bell
+WorkingDirectory=/opt/bell-console/console
+ExecStart=/usr/bin/npm run start:worker
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

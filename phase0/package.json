@@ -1,0 +1,24 @@
+{
+  "name": "unifi-bell-console-phase0",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Phase 0 hardware/API validation harness for the UniFi Bell Console (UniFi Protect AI Speakers)",
+  "type": "module",
+  "scripts": {
+    "phase0": "tsx src/cli.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "dependencies": {
+    "undici": "^7.3.0",
+    "ws": "^8.21.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

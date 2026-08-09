@@ -1,0 +1,24 @@
+# OS noise
+.DS_Store
+
+# Local credentials — copy .env.example and fill in per machine. Never commit:
+# these hold the Protect admin password and API key.
+.env
+.env.local
+
+# Runtime data: the live SQLite database (password hashes, sessions, audit
+# trail), staff voice recordings, and database backups. State, not source.
+console/data/
+console/backups/
+
+# Phase-0 run evidence (hardware probe output)
+phase0/results/
+
+# Local sound library — deployments bring their own audio; not part of the repo
+sound-pack/
+
+# Dependencies / build output (also covered per-package for tooling that
+# reads nested .gitignore files)
+node_modules/
+.next/
+*.tsbuildinfo

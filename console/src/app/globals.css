@@ -1,0 +1,169 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-geist-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-emergency: var(--emergency);
+  --color-emergency-foreground: var(--emergency-foreground);
+  --color-warning-strong: var(--warning-strong);
+  --color-warning-strong-foreground: var(--warning-strong-foreground);
+}
+
+/* UniFi-adjacent light theme — agreed token palette, original values */
+:root {
+  --background: #f6f7f9;          /* canvas */
+  --foreground: #182230;          /* text-primary */
+  --card: #ffffff;                /* surface */
+  --card-foreground: #182230;
+  --popover: #ffffff;
+  --popover-foreground: #182230;
+  --primary: #2f6fed;             /* accent */
+  --primary-foreground: #ffffff;
+  --secondary: #f0f2f5;           /* surface-muted */
+  --secondary-foreground: #182230;
+  --muted: #f0f2f5;
+  --muted-foreground: #667085;    /* text-muted */
+  --accent: #eef3fd;
+  --accent-foreground: #2f6fed;
+  --destructive: #cc3d3d;         /* danger — a FOREGROUND red: use as text, or
+                                     as a /10 tint. Too light to sit behind
+                                     white text (4.9:1). For a solid red
+                                     surface use --emergency below. */
+  --emergency: #a82121;           /* emergency surface — white on this is 7.2:1 */
+  --emergency-foreground: #ffffff;
+  --success: #168a5b;
+  --success-foreground: #ffffff;
+  --warning: #d8860b;
+  /* Dark, not white: white on this amber is 2.9:1. Dark text is 6.3:1, and
+     matches what the dark theme already does with its amber. */
+  --warning-foreground: #101722;
+  /* For amber text, icons and buttons sitting on a light amber tint —
+     --warning itself is a surface colour and only reaches ~2.4:1 there. */
+  --warning-strong: #8a5408;
+  --warning-strong-foreground: #ffffff;
+  --border: #e2e6eb;
+  --input: #e2e6eb;
+  --ring: #2f6fed;
+  --chart-1: #2f6fed;
+  --chart-2: #168a5b;
+  --chart-3: #d8860b;
+  --chart-4: #667085;
+  --chart-5: #cc3d3d;
+  --radius: 0.375rem;             /* 6px */
+  --sidebar: #ffffff;
+  --sidebar-foreground: #182230;
+  --sidebar-primary: #2f6fed;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eef3fd;
+  --sidebar-accent-foreground: #2f6fed;
+  --sidebar-border: #e2e6eb;
+  --sidebar-ring: #2f6fed;
+}
+
+.dark {
+  --background: #101722;
+  --foreground: #e6eaf0;
+  --card: #182230;
+  --card-foreground: #e6eaf0;
+  --popover: #182230;
+  --popover-foreground: #e6eaf0;
+  --primary: #4d84f0;
+  --primary-foreground: #ffffff;
+  --secondary: #1f2b3c;
+  --secondary-foreground: #e6eaf0;
+  --muted: #1f2b3c;
+  --muted-foreground: #8a94a6;
+  --accent: #1d2f4d;
+  --accent-foreground: #7ba4f4;
+  --destructive: #e05252;
+  /* Lifted off the light value so it still reads as red against the dark
+     canvas, but kept dark enough for white text (5.8:1). */
+  --emergency: #c02b2b;
+  --emergency-foreground: #ffffff;
+  --success: #2aa876;
+  --success-foreground: #ffffff;
+  --warning: #e39a2d;
+  --warning-foreground: #101722;
+  /* On a dark tint the surface amber is already legible, and wants dark text. */
+  --warning-strong: #e39a2d;
+  --warning-strong-foreground: #101722;
+  --border: #253247;
+  --input: #253247;
+  --ring: #4d84f0;
+  --chart-1: #4d84f0;
+  --chart-2: #2aa876;
+  --chart-3: #e39a2d;
+  --chart-4: #8a94a6;
+  --chart-5: #e05252;
+  --sidebar: #182230;
+  --sidebar-foreground: #e6eaf0;
+  --sidebar-primary: #4d84f0;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1d2f4d;
+  --sidebar-accent-foreground: #7ba4f4;
+  --sidebar-border: #253247;
+  --sidebar-ring: #4d84f0;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+    /* Always reserve the scrollbar gutter. Without this, the scroll lock that
+       runs when a dialog or popover opens removes the scrollbar, the content
+       area widens, and wrapped form rows visibly jump. */
+    scrollbar-gutter: stable;
+  }
+}

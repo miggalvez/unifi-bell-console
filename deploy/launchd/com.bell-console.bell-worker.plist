@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- School Bell Console scheduler worker (macOS).
+     Install: adjust the WorkingDirectory path, then
+       cp com.bell-console.bell-worker.plist ~/Library/LaunchAgents/
+       launchctl load ~/Library/LaunchAgents/com.bell-console.bell-worker.plist -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.bell-console.bell-worker</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>cd "/path/to/unifi-bell-console/console" &amp;&amp; npm run start:worker</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/bell-worker.log</string>
+  <key>StandardErrorPath</key><string>/tmp/bell-worker.log</string>
+</dict>
+</plist>

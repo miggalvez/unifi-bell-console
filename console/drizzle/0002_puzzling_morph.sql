@@ -1,0 +1,1 @@
+ALTER TABLE `scheduled_runs` ADD `estimated_duration_ms` integer;

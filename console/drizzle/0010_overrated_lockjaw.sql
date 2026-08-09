@@ -1,0 +1,1 @@
+ALTER TABLE `scheduled_runs` ADD `audio_paths` text;

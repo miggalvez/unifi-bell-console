@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- School Bell Console web process (macOS).
+     Install: adjust the WorkingDirectory path, then
+       cp com.bell-console.bell-web.plist ~/Library/LaunchAgents/
+       launchctl load ~/Library/LaunchAgents/com.bell-console.bell-web.plist
+     Run `npm run build` in console/ once before first load. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.bell-console.bell-web</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>cd "/path/to/unifi-bell-console/console" &amp;&amp; npm run start:web</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/bell-web.log</string>
+  <key>StandardErrorPath</key><string>/tmp/bell-web.log</string>
+</dict>
+</plist>

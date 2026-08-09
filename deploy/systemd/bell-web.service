@@ -1,0 +1,20 @@
+# School Bell Console — web process (Next.js)
+# Install: copy to /etc/systemd/system/, adjust paths/user, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now bell-web
+[Unit]
+Description=School Bell Console (web)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bell
+WorkingDirectory=/opt/bell-console/console
+ExecStartPre=/usr/bin/npm run build
+ExecStart=/usr/bin/npm run start:web
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
