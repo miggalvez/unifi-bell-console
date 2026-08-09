@@ -20,6 +20,37 @@ always-on machine on your LAN, so bells keep ringing when the internet doesn't.
 - Speaker zones, pause, DST-safe scheduling, health monitoring, full audit
   trail, plain-language UI for school staff.
 
+## What it looks like
+
+**Overview** — system health, the next bells, and pause at a glance:
+
+![Overview](docs/screenshots/overview.png)
+
+**Announcements** — record your voice, type a message, or tap a saved one;
+emergency tiles are hold-to-arm:
+
+![Announcements](docs/screenshots/announcements.png)
+
+**Bell plans** — reusable day templates, with each plan's shape and usage:
+
+![Bell Plans](docs/screenshots/plans.png)
+
+**Drills** (dark theme) — scripted practice runs, always bracketed by a
+"this is a drill" announcement:
+
+![Drills](docs/screenshots/drills-dark.png)
+
+## Try it without hardware
+
+```
+cd console && npm install && npm run demo
+```
+
+Then open http://localhost:3001 and sign in as **demo / demo1234**
+(or **staff / demo1234** for the staff view). This seeds a fictional school
+into `data/demo.db` and serves the full interface — UI only: nothing plays
+without a real NVR, and the scheduler worker is not started.
+
 ## Layout
 
 - **[console/](console/)** — the application: Next.js staff UI + scheduler

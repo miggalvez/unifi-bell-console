@@ -4,8 +4,24 @@
     {
       "name": "bell-console",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "console"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "console"
+      ],
       "port": 3000
+    },
+    {
+      "name": "demo",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "demo",
+        "--prefix",
+        "console"
+      ],
+      "port": 3001
     }
   ]
 }

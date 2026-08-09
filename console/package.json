@@ -13,7 +13,9 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "create-admin": "tsx scripts/create-admin.ts"
+    "create-admin": "tsx scripts/create-admin.ts",
+    "seed-demo": "DB_PATH=data/demo.db tsx scripts/seed-demo.ts",
+    "demo": "npm run seed-demo && DB_PATH=data/demo.db next dev -p 3001"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
