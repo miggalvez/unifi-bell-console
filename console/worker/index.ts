@@ -16,11 +16,13 @@ import { executeClaimedRun } from "@/lib/scheduler/executor";
 import { materialize } from "@/lib/scheduler/materializer";
 import { tickAlert } from "@/lib/alerts";
 import { tickDrill } from "@/lib/drills";
+import { updateSystemState } from "@/lib/state";
 
 const CLAIM_INTERVAL_MS = 1_000;
 const HEALTH_INTERVAL_MS = 30_000;
 const FIRMWARE_INTERVAL_MS = 60 * 60_000;
 const MATERIALIZE_INTERVAL_MS = 6 * 60 * 60_000;
+const HEARTBEAT_INTERVAL_MS = 5_000;
 
 function log(msg: string): void {
   console.log(`[worker ${new Date().toISOString()}] ${msg}`);
@@ -29,8 +31,17 @@ function log(msg: string): void {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function main(): Promise<void> {
+  const startedAt = Date.now();
+  updateSystemState({ workerStartedAt: startedAt, workerHeartbeatAt: startedAt });
   const users = db.select({ n: count() }).from(schema.users).get();
   log(`started — db ready, ${users?.n ?? 0} user(s)`);
+
+  // The heartbeat is a timer, not part of the claim loop: a delivery await can
+  // hold that loop for the length of a recording (30s+), and the dashboard
+  // must not read normal playback as "the scheduler is not checking in". The
+  // beat answers "is the worker process alive", which a timer answers
+  // truthfully even mid-delivery.
+  setInterval(() => updateSystemState({ workerHeartbeatAt: Date.now() }), HEARTBEAT_INTERVAL_MS);
 
   const m = materialize();
   log(`materialized schedule through ${m.horizonEnd} (${m.inserted} runs)`);

@@ -6,6 +6,7 @@ import { getSystemState, isPaused } from "@/lib/state";
 import { env } from "@/env";
 import { readAlertState } from "@/lib/alerts";
 import { readDrillState } from "@/lib/drills";
+import { getTodaySchedule } from "@/lib/today";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +47,7 @@ export async function GET() {
     schoolTz: env.schoolTz,
     alert: readAlertState(now),
     drill: readDrillState(now),
+    today: getTodaySchedule(now),
     nextRuns,
     now,
     paused: isPaused(state, now),

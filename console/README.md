@@ -40,6 +40,23 @@ the words instead (which also has no 120-character limit).
 The interface follows the viewer's system light/dark setting by default, with a
 toggle at the bottom of the sidebar (Light / Dark / Auto) remembered per browser.
 
+**Today's schedule.** Overview is the school office's day-of command center: it
+shows the effective plan, every bell's current result, the next bell and its
+countdown, and a plain-language readiness result. Administrators can skip the
+next bell, delay it by 5 or 10 minutes, undo that change, or switch the rest of
+today to another saved plan. Every change is audited. Skip and delay decisions
+are stored as one-day schedule overrides, so the worker's periodic horizon
+rebuild cannot quietly erase them; a change within 10 seconds of a bell is
+refused, and a delay that would overlap the following bell is refused.
+The adjacent pause control can resume at a specific school-clock time as well
+as after a duration or at the end of the day.
+
+Readiness includes a five-second heartbeat from the scheduler claim loop. This
+is deliberately separate from Protect connectivity: manual announcements run
+in the web process, so the speakers can be reachable while unattended bells
+are not running. Staff see “Today is ready” or a direct support message rather
+than internal worker or materialization terminology.
+
 Staff can also **record a spoken announcement in the browser** (Announcements →
 Speak an announcement): record, listen back, then send. Recordings are streamed
 through the same talkback path and are discarded unless explicitly saved to the
@@ -208,7 +225,7 @@ Key facts the .env comments don't cover:
 ## Tests & verification
 
 ```
-npm test                        # 109 unit tests: DST materialization, exactly-once
+npm test                        # 120 unit tests: DST materialization, exactly-once
                                 # claims, no-double-bell executor, speaker lock,
                                 # repeating alerts, drill sequences, TTS voices, auth
 npx tsx scripts/e2e-verify.ts   # webhook + TTS against the real console — AUDIBLE

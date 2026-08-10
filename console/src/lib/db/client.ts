@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { readMigrationFiles } from "drizzle-orm/migrator";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { env, projectRoot } from "@/env";
@@ -12,9 +12,49 @@ interface DbGlobal {
   __bellDb?: { sqlite: Database.Database; db: Db };
 }
 
+/**
+ * Drizzle's synchronous SQLite migrator reads the latest migration before its
+ * deferred BEGIN acquires a write lock. Parallel Next build workers can both
+ * observe the same old row and then run the same CREATE TABLE. BEGIN IMMEDIATE
+ * serializes that read-and-apply sequence across processes.
+ */
+function migrateSerialized(sqlite: Database.Database, migrationsFolder: string): void {
+  const migrations = readMigrationFiles({ migrationsFolder });
+  sqlite.exec("BEGIN IMMEDIATE");
+  try {
+    // "SERIAL" means nothing to SQLite (the column gets no autoincrement and
+    // its PK even admits NULLs) — kept verbatim because it is exactly the
+    // table drizzle's own migrator creates, and every deployed database
+    // already has it in this shape.
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS __drizzle_migrations (
+        id SERIAL PRIMARY KEY,
+        hash text NOT NULL,
+        created_at numeric
+      )
+    `);
+    const latest = sqlite
+      .prepare("SELECT created_at FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 1")
+      .get() as { created_at: number | string } | undefined;
+    const latestAt = latest ? Number(latest.created_at) : null;
+
+    for (const migration of migrations) {
+      if (latestAt !== null && latestAt >= migration.folderMillis) continue;
+      for (const statement of migration.sql) sqlite.exec(statement);
+      sqlite
+        .prepare("INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)")
+        .run(migration.hash, migration.folderMillis);
+    }
+    sqlite.exec("COMMIT");
+  } catch (error) {
+    if (sqlite.inTransaction) sqlite.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 // Singleton via globalThis so Next dev HMR doesn't stack connections.
-// Both processes (web + worker) run migrations at boot; drizzle's migrator is
-// transactional and busy_timeout makes a simultaneous start safe.
+// Both processes (and parallel Next build workers) may open the database at
+// once; migrateSerialized + busy_timeout make that startup safe.
 function init(): { sqlite: Database.Database; db: Db } {
   const g = globalThis as DbGlobal;
   if (g.__bellDb) return g.__bellDb;
@@ -33,7 +73,7 @@ function init(): { sqlite: Database.Database; db: Db } {
   // actions on referencing rows. Discovered live when migration 0011 hit a
   // RESTRICT; the connection-level default set here is what actually governs.
   sqlite.pragma("foreign_keys = OFF");
-  migrate(db, { migrationsFolder: resolve(projectRoot, "drizzle") });
+  migrateSerialized(sqlite, resolve(projectRoot, "drizzle"));
   const orphans = sqlite.pragma("foreign_key_check") as unknown[];
   if (orphans.length > 0) {
     throw new Error(`migrations left ${orphans.length} broken reference(s): ${JSON.stringify(orphans[0])}`);

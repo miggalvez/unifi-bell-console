@@ -195,6 +195,37 @@ export const calendarExceptions = sqliteTable("calendar_exceptions", {
   createdAt: integer("created_at").notNull(),
 });
 
+/**
+ * One-day changes made from the staff-facing Today view. These live beside the
+ * schedule definition instead of only mutating a materialized run, so the
+ * worker's six-hour horizon refresh cannot accidentally undo a skipped or
+ * delayed bell.
+ */
+export const bellEventOverrides = sqliteTable(
+  "bell_event_overrides",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    localDate: text("local_date").notNull(),
+    bellEventId: integer("bell_event_id")
+      .notNull()
+      .references(() => bellEvents.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["SKIP", "DELAY"] }).notNull(),
+    /** School-local HH:MM; required only for DELAY. */
+    effectiveTime: text("effective_time"),
+    createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("bell_event_override_date_event_uniq").on(t.localDate, t.bellEventId),
+    check(
+      "bell_event_override_kind_fields",
+      sql`(kind = 'SKIP' AND effective_time IS NULL)
+        OR (kind = 'DELAY' AND effective_time IS NOT NULL)`,
+    ),
+  ],
+);
+
 // One lifecycle for scheduled, manual, and emergency playback. Execution
 // fields are snapshotted at materialize/trigger time so later cue edits
 // cannot rewrite history.
@@ -345,6 +376,9 @@ export const systemState = sqliteTable(
       .default(false),
     apiKeyExpiresAt: integer("api_key_expires_at"), // admin-recorded; API doesn't report it
     lastMaterializedThrough: text("last_materialized_through"), // localDate
+    /** Freshness of the one-second scheduler loop, distinct from Protect health. */
+    workerHeartbeatAt: integer("worker_heartbeat_at"),
+    workerStartedAt: integer("worker_started_at"),
     /**
      * Speakers cannot play two things at once: Protect returns HTTP 500 for
      * TTS during playback, and talkback sessions need spacing. Every delivery

@@ -48,6 +48,14 @@ export function materialize(now: DateTime = nowLocal()): { inserted: number; hor
     for (let d = startDate; d <= horizonEnd; d = addDaysLocal(d, 1)) {
       const planId = effectivePlanIdFor(d);
       if (planId == null) continue;
+      const overrides = new Map(
+        db
+          .select()
+          .from(schema.bellEventOverrides)
+          .where(eq(schema.bellEventOverrides.localDate, d))
+          .all()
+          .map((override) => [override.bellEventId, override]),
+      );
       const events = db
         .select({ ev: schema.bellEvents, cue: schema.soundCues })
         .from(schema.bellEvents)
@@ -61,7 +69,12 @@ export function materialize(now: DateTime = nowLocal()): { inserted: number; hor
         )
         .all();
       for (const { ev, cue } of events) {
-        const at = localToUtcEpoch(d, ev.time);
+        const override = overrides.get(ev.id);
+        if (override?.kind === "SKIP") continue;
+        const effectiveTime = override?.kind === "DELAY" && override.effectiveTime
+          ? override.effectiveTime
+          : ev.time;
+        const at = localToUtcEpoch(d, effectiveTime);
         if (at <= cutoffMs) continue;
         try {
           db.insert(schema.scheduledRuns)
@@ -85,7 +98,7 @@ export function materialize(now: DateTime = nowLocal()): { inserted: number; hor
               estimatedDurationMs: cue.estimatedDurationMs,
               scheduledAtUtc: at,
               localDate: d,
-              localTime: ev.time,
+              localTime: effectiveTime,
               status: "PENDING",
               createdAt: Date.now(),
             })
