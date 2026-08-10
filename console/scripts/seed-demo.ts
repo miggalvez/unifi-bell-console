@@ -189,12 +189,12 @@ async function main(): Promise<void> {
     { source: "MANUAL", deliveryMethod: "PROTECT_NATIVE_TTS", webhookId: null, cueId: null, cueName: "(typed announcement)", ttsText: "Bus 12 is running ten minutes late this afternoon.", httpStatus: 200, requestedBy: staff.id },
     y8.set({ hour: 14, minute: 5 }).toMillis(),
   );
-  // Upcoming: the next few scheduled bells.
-  let upcoming = DateTime.fromMillis(now, { zone: tz }).plus({ hours: 1 }).set({ minute: 0, second: 0, millisecond: 0 });
-  for (const label of ["Class change", "Recess bell", "Class change"]) {
-    run({ cueName: label, status: "PENDING", httpStatus: null, latencyMs: null, executedAt: null }, upcoming.toMillis());
-    upcoming = upcoming.plus({ minutes: 50 });
-  }
+  // Upcoming bells come from the REAL materializer, not hand-forged rows: the
+  // Today card matches runs to plan events by id and time, and forged rows
+  // would (correctly) show as "not queued". This also fills the Schedule page
+  // for the whole horizon.
+  const { materialize } = await import("@/lib/scheduler/materializer");
+  materialize();
 
   // ── a drill, on the books ──
   const seq = db
@@ -222,7 +222,17 @@ async function main(): Promise<void> {
   audit(now - 86_400_000 * 6 + 600_000, admin.id, "drill.finish", { completed: true });
 
   db.update(schema.systemState)
-    .set({ lastHealthOkAt: now - 12_000, consecutiveHealthFailures: 0, apiKeyExpiresAt: now + 25 * 86_400_000 })
+    .set({
+      // The demo intentionally runs no worker and reaches no NVR, but the UI
+      // being demonstrated is the healthy state. Far-future timestamps keep
+      // the readiness and health cards green for the whole browsing session;
+      // timeAgo() clamps future values to "just now", so nothing renders oddly.
+      lastHealthOkAt: now + 365 * 86_400_000,
+      workerHeartbeatAt: now + 365 * 86_400_000,
+      workerStartedAt: now,
+      consecutiveHealthFailures: 0,
+      apiKeyExpiresAt: now + 25 * 86_400_000,
+    })
     .run();
 
   sqlite.close();

@@ -19,10 +19,12 @@ always-on machine on your LAN, so bells keep ringing when the internet doesn't.
   "this is a drill" announcement, aborted instantly by a real alert.
 - Speaker zones, pause, DST-safe scheduling, health monitoring, full audit
   trail, plain-language UI for school staff.
+- **Today command center** with the live day timeline, next-bell countdown,
+  staff-readable readiness, and guarded skip/delay/plan-change controls.
 
 ## What it looks like
 
-**Overview** — system health, the next bells, and pause at a glance:
+**Overview** — today's bell plan with day-of controls (skip, delay, switch plan), system health, and pause:
 
 ![Overview](docs/screenshots/overview.png)
 
