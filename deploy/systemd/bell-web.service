@@ -1,6 +1,11 @@
 # School Bell Console — web process (Next.js)
 # Install: copy to /etc/systemd/system/, adjust paths/user, then:
+#   cd /opt/bell-console/console && npm ci && npm run build
 #   sudo systemctl daemon-reload && sudo systemctl enable --now bell-web
+#
+# Build at deploy time, never here: this unit restarts on failure, so a build
+# in ExecStartPre turns any crash into a rebuild loop competing with the
+# scheduler worker for CPU. `start:web` serves the existing .next/ build.
 [Unit]
 Description=School Bell Console (web)
 After=network-online.target
@@ -10,7 +15,6 @@ Wants=network-online.target
 Type=simple
 User=bell
 WorkingDirectory=/opt/bell-console/console
-ExecStartPre=/usr/bin/npm run build
 ExecStart=/usr/bin/npm run start:web
 Restart=always
 RestartSec=5

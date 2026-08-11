@@ -11,6 +11,11 @@
 console/data/
 console/backups/
 
+# Filled-in site sheet — one building's network layout, hardware locations,
+# and contacts, for the machine that runs its PA. Copy SITE-TEMPLATE.md (which
+# is committed) per install and keep the result here, unpublished.
+deploy/SITE.md
+
 # Phase-0 run evidence (hardware probe output)
 phase0/results/
 

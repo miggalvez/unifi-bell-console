@@ -65,7 +65,9 @@ without a real NVR, and the scheduler worker is not started.
   (encoding, arm delay, frame pacing, session-release floor, long-session
   behaviour). If you build anything on Protect's talkback channel, start there.
 - **[deploy/](deploy/)** — launchd (macOS) and systemd (Linux) supervision
-  configs.
+  configs, and **[RUNBOOK.md](deploy/RUNBOOK.md)**: bare machine to ringing
+  bells, in order — BIOS settings, host setup, install, and the verification
+  steps that actually prove it works (including pulling the plug).
 
 ## Honest caveats
 

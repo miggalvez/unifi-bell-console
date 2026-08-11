@@ -242,3 +242,6 @@ npx tsx scripts/drill-verify.ts           # drill sequence: repeats, the tag on
 Deployment configs for both processes are in `../deploy/` (launchd for a Mac,
 systemd for the school mini PC). Production: `npm run build`, then
 `start:web` + `start:worker` under supervision; reboot must bring both back.
+The build is a deploy step, not a boot step — supervision restarts these
+processes on failure, so building at start would make a crash loop into a
+rebuild loop on a box that is also counting down to the next bell.
