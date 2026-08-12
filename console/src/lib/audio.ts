@@ -21,7 +21,7 @@ export function audioPath(storedName: string): string {
 export function probeDurationMs(file: string): Promise<number | null> {
   return new Promise((res) => {
     const p = spawn(
-      env.ffprobePath,
+      /* turbopackIgnore: true */ env.ffprobePath,
       ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", file],
       { stdio: ["ignore", "pipe", "ignore"] },
     );
@@ -38,7 +38,7 @@ export function probeDurationMs(file: string): Promise<number | null> {
 /** True when ffmpeg is available — streaming is unavailable without it. */
 export function ffmpegAvailable(): Promise<boolean> {
   return new Promise((res) => {
-    const p = spawn(env.ffmpegPath, ["-version"], { stdio: "ignore" });
+    const p = spawn(/* turbopackIgnore: true */ env.ffmpegPath, ["-version"], { stdio: "ignore" });
     p.on("error", () => res(false));
     p.on("close", (code) => res(code === 0));
   });

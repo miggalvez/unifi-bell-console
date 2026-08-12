@@ -162,7 +162,10 @@ export async function encodeAdts(opts: StreamOptions): Promise<Buffer[]> {
     "-ar", "24000", "-ac", "1", "-b:a", "48k",
     "-f", "adts", "pipe:1",
   ];
-  const ff = spawn(opts.ffmpegPath ?? "ffmpeg", argv, { stdio: ["ignore", "pipe", "pipe"] });
+  // turbopackIgnore: ffmpeg is a system binary, not a project file — without
+  // this, Turbopack traces the entire project (public/ included) into the
+  // server bundle.
+  const ff = spawn(/* turbopackIgnore: true */ opts.ffmpegPath ?? "ffmpeg", argv, { stdio: ["ignore", "pipe", "pipe"] });
   const chunks: Buffer[] = [];
   let stderr = "";
   ff.stdout.on("data", (c: Buffer) => chunks.push(c));
