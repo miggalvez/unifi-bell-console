@@ -3,12 +3,12 @@
 import Link from "next/link";
 import { useRef, useTransition } from "react";
 import { toast } from "sonner";
-import { Archive, ArchiveRestore, Copy, Plus } from "lucide-react";
+import { Archive, ArchiveRestore, Copy, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { friendlyTime } from "@/lib/format";
-import { createPlan, duplicatePlan, setPlanArchived } from "./actions";
+import { createPlan, deletePlan, duplicatePlan, setPlanArchived } from "./actions";
 
 export interface PlanListItem {
   id: number;
@@ -152,6 +152,27 @@ function PlanCard({ plan, isAdmin }: { plan: PlanListItem; isAdmin: boolean }) {
           >
             {plan.isArchived ? <ArchiveRestore className="size-3.5" /> : <Archive className="size-3.5" />}
             {plan.isArchived ? "Restore" : "Archive"}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={pending}
+            onClick={() => {
+              if (
+                !confirm(
+                  `Delete "${plan.name}"${plan.bellCount > 0 ? ` and its ${plan.bellCount} bell${plan.bellCount === 1 ? "" : "s"}` : ""}? ` +
+                    "Bells that already rang stay in the activity record.",
+                )
+              )
+                return;
+              startTransition(async () => {
+                const r = await deletePlan(plan.id);
+                if (r.ok) toast.success("Plan deleted");
+                else toast.error(r.error ?? "Could not delete it");
+              });
+            }}
+          >
+            <Trash2 className="size-3.5" /> Delete
           </Button>
         </div>
       ) : null}

@@ -1,11 +1,12 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { and, eq, gte, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { db, schema } from "@/lib/db/client";
+import { db, schema, sqlite } from "@/lib/db/client";
 import { requireAdmin } from "@/lib/auth/guards";
 import { writeAudit } from "@/lib/audit";
 import { materialize } from "@/lib/scheduler/materializer";
+import { localDateTimeParts } from "@/lib/scheduler/time";
 
 export interface PlanActionResult {
   ok: boolean;
@@ -117,5 +118,79 @@ export async function deleteEvent(eventId: number): Promise<PlanActionResult> {
   writeAudit({ userId: user.id, action: "plan.delete_event", targetType: "event", targetId: eventId });
   rematerialize();
   revalidatePath(`/plans/${ev.bellPlanId}`);
+  return { ok: true };
+}
+
+/**
+ * Deleting a plan is allowed only once nothing FUTURE depends on it: weekday
+ * assignments and upcoming calendar dates refuse loudly, because cascading
+ * through them would silently change what rings. History is safe by design —
+ * past runs keep their name/time snapshots, and their event links go null.
+ */
+export async function deletePlan(id: number): Promise<PlanActionResult> {
+  const user = await requireAdmin();
+  const plan = db.select().from(schema.bellPlans).where(eq(schema.bellPlans.id, id)).get();
+  if (!plan) return { ok: true };
+
+  const assignedDays = db
+    .select({ day: schema.weekSchedule.dayOfWeek })
+    .from(schema.weekSchedule)
+    .where(eq(schema.weekSchedule.bellPlanId, id))
+    .all();
+  if (assignedDays.length > 0) {
+    return {
+      ok: false,
+      error: `"${plan.name}" still rings on the weekly schedule — assign those days to another plan first (Schedule page).`,
+    };
+  }
+
+  const { localDate: today } = localDateTimeParts();
+  const upcoming = db
+    .select({ date: schema.calendarExceptions.date })
+    .from(schema.calendarExceptions)
+    .where(and(eq(schema.calendarExceptions.bellPlanId, id), gte(schema.calendarExceptions.date, today)))
+    .all();
+  if (upcoming.length > 0) {
+    return {
+      ok: false,
+      error: `${upcoming.length} upcoming date${upcoming.length === 1 ? "" : "s"} (first: ${upcoming[0].date}) still use${upcoming.length === 1 ? "s" : ""} "${plan.name}" — change those days first (Schedule page).`,
+    };
+  }
+
+  const eventIds = db
+    .select({ id: schema.bellEvents.id })
+    .from(schema.bellEvents)
+    .where(eq(schema.bellEvents.bellPlanId, id))
+    .all()
+    .map((e) => e.id);
+
+  const tx = sqlite.transaction(() => {
+    // Any still-queued bells from this plan must not outlive it: their event
+    // link would go null on cascade and they would ring as orphans.
+    if (eventIds.length > 0) {
+      db.delete(schema.scheduledRuns)
+        .where(
+          and(
+            eq(schema.scheduledRuns.source, "SCHEDULE"),
+            eq(schema.scheduledRuns.status, "PENDING"),
+            inArray(schema.scheduledRuns.bellEventId, eventIds),
+          ),
+        )
+        .run();
+    }
+    // Cascades: bell_events (and their one-day overrides), past calendar
+    // exceptions. Run history keeps its snapshots with event links nulled.
+    db.delete(schema.bellPlans).where(eq(schema.bellPlans.id, id)).run();
+  });
+  tx.immediate();
+
+  writeAudit({
+    userId: user.id,
+    action: "plan.delete",
+    targetType: "plan",
+    targetId: id,
+    detail: { name: plan.name, bells: eventIds.length },
+  });
+  rematerialize();
   return { ok: true };
 }
