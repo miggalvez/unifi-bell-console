@@ -16,6 +16,10 @@ console/backups/
 # is committed) per install and keep the result here, unpublished.
 deploy/SITE.md
 
+# Written by deploy/update.sh on the deployment machine: the commit to return
+# to if an update goes wrong. Per-machine state, not source.
+.last-good-commit
+
 # Phase-0 run evidence (hardware probe output)
 phase0/results/
 

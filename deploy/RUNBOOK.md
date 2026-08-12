@@ -405,19 +405,32 @@ To restore: stop both services, replace `data/bell.db`, start them again.
 **Updating:**
 
 ```bash
-cd /opt/bell-console
-sudo systemctl stop bell-web bell-worker
-sudo -u bell -H git pull
-cd console && sudo -u bell -H npm ci && sudo -u bell -H npm run build
-sudo systemctl start bell-worker bell-web
+sudo /opt/bell-console/deploy/update.sh
 ```
 
-Snapshot first if you are on Proxmox. Parts of the Protect integration use
-undocumented APIs; a Protect release can break them without notice, and the
-rollback is what makes that a bad afternoon instead of a bad week.
+That fetches, installs, builds, restarts, and verifies — services active, the
+web process serving, and the scheduler's heartbeat fresh. It exits non-zero and
+prints the rollback command if any of that fails. Roll back with:
+
+```bash
+sudo /opt/bell-console/deploy/update.sh --rollback
+```
+
+Do it by hand only when you need to deviate; the steps are `git fetch` +
+`reset --hard origin/main`, `npm ci`, `npm run build`, restart both units. Two
+things bite people who type it out: every git command needs `sudo -u bell -H`
+(the repo is owned by `bell`, and git refuses on ownership mismatch), and the
+clone is shallow, so reset to `origin/main` rather than `git pull`.
+
+**Roll back the code, not the VM.** A Proxmox snapshot reverts the database
+with it — every schedule change, activity record and recording since you took
+it. For a bad build the right rollback is the previous commit, which leaves the
+data alone. That is what `--rollback` does. Save snapshot rollback for "the box
+is broken", never for "the new build has a bug".
 
 Afterwards, verify — re-run Part 7's "a real bell rings" step. An update that
-builds cleanly can still have lost the speaker.
+builds cleanly can still have lost the speaker, and the script cannot check
+that for you.
 
 **Logs:**
 
