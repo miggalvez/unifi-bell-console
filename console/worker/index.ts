@@ -4,10 +4,7 @@
  * Loops: claim (1s), health (30s), firmware/version (hourly), re-materialize (6h).
  */
 import { count, lt } from "drizzle-orm";
-import { mkdirSync, readdirSync, unlinkSync } from "node:fs";
-import { resolve } from "node:path";
-import { db, schema, sqlite } from "@/lib/db/client";
-import { projectRoot } from "@/env";
+import { db, schema } from "@/lib/db/client";
 import { pruneExpiredSessions } from "@/lib/auth/session";
 import { pollHealthOnce, pollFirmwareOnce } from "@/lib/health";
 import { realAdapter } from "@/lib/protect/adapter";
@@ -115,27 +112,18 @@ async function main(): Promise<void> {
 
   setInterval(() => pruneExpiredSessions(), 60 * 60_000);
 
-  // Daily maintenance: consistent backup snapshot + pruning.
-  const daily = () => {
+  // Idempotent database housekeeping. Backups deliberately run in independent
+  // systemd timers so restarting the scheduler cannot consume retention.
+  const pruneHealthHistory = () => {
     try {
-      const dir = resolve(projectRoot, "backups");
-      mkdirSync(dir, { recursive: true });
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      sqlite.prepare("VACUUM INTO ?").run(resolve(dir, `bell-${stamp}.db`));
-      // keep the newest 14 backups
-      const backups = readdirSync(dir).filter((f) => f.startsWith("bell-") && f.endsWith(".db")).sort();
-      for (const old of backups.slice(0, Math.max(0, backups.length - 14))) {
-        unlinkSync(resolve(dir, old));
-      }
-      // health samples older than 7 days
       db.delete(schema.healthChecks).where(lt(schema.healthChecks.at, Date.now() - 7 * 86_400_000)).run();
-      log(`daily maintenance done (${backups.length} backups on disk)`);
+      log("expired health history pruned");
     } catch (err) {
-      console.error("[worker] daily maintenance error:", err);
+      console.error("[worker] health-history prune error:", err);
     }
   };
-  daily();
-  setInterval(daily, 24 * 60 * 60_000);
+  pruneHealthHistory();
+  setInterval(pruneHealthHistory, 24 * 60 * 60_000);
 
   log("claim loop (1s) + health poller (30s) running");
 }

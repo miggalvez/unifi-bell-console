@@ -105,9 +105,13 @@ Usernames and roles only — never passwords.
 
 | | |
 |---|---|
-| Database backup destination | |
-| Frequency / retention | |
-| Last restore test | |
+| Local database backup | `backups/daily/` — one validated snapshot per school date |
+| Local retention | 14 distinct daily snapshots; manual snapshots separate |
+| Recording backup | `data/audio/` included in every off-site bundle |
+| Off-site destination | Private R2 bucket / prefix |
+| Off-site retention | 30-day lock / 90-day lifecycle |
+| Latest completed R2 key | |
+| Last isolated restore test | |
 | Proxmox snapshot label | |
 | Where `.env` is backed up | |
 

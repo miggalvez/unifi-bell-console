@@ -379,6 +379,13 @@ export const systemState = sqliteTable(
     /** Freshness of the one-second scheduler loop, distinct from Protect health. */
     workerHeartbeatAt: integer("worker_heartbeat_at"),
     workerStartedAt: integer("worker_started_at"),
+    localBackupLastAttemptAt: integer("local_backup_last_attempt_at"),
+    localBackupLastSuccessAt: integer("local_backup_last_success_at"),
+    localBackupLastError: text("local_backup_last_error"),
+    offsiteBackupLastAttemptAt: integer("offsite_backup_last_attempt_at"),
+    offsiteBackupLastSuccessAt: integer("offsite_backup_last_success_at"),
+    offsiteBackupLastError: text("offsite_backup_last_error"),
+    lastCompletedR2Key: text("last_completed_r2_key"),
     /**
      * Speakers cannot play two things at once: Protect returns HTTP 500 for
      * TTS during playback, and talkback sessions need spacing. Every delivery

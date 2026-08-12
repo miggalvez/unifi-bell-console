@@ -219,13 +219,18 @@ Key facts the .env comments don't cover:
   (default 2 min), the bell is recorded MISSED and never plays late.
 - **Pause** skips scheduled bells (recorded as SKIPPED_PAUSED); manual and
   emergency playback ignore it.
-- Backups: `VACUUM INTO backups/` daily from the worker (kept: 14) or the
-  Settings button. Restore = stop services, replace `data/bell.db`, start.
+- Backups are independent of the worker: a persistent systemd timer creates
+  one validated `VACUUM INTO backups/daily/` snapshot per school date (14
+  dates retained), while another creates a fresh database + `data/audio/`
+  bundle in private R2. Settings creates unpruned local manual snapshots.
+- A restore requires **both** `bell.db` (catalogue, schedules, users, audit)
+  and `data/audio/` (the recording bytes). See `deploy/RUNBOOK.md`; never copy
+  the live WAL database directly.
 
 ## Tests & verification
 
 ```
-npm test                        # 120 unit tests: DST materialization, exactly-once
+npm test                        # 132 unit tests: DST materialization, exactly-once
                                 # claims, no-double-bell executor, speaker lock,
                                 # repeating alerts, drill sequences, TTS voices, auth
 npx tsx scripts/e2e-verify.ts   # webhook + TTS against the real console — AUDIBLE

@@ -1,0 +1,11 @@
+[Unit]
+Description=School Bell Console daily off-site backup timer
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 America/Chicago
+Persistent=true
+AccuracySec=1min
+Unit=bell-backup-offsite.service
+
+[Install]
+WantedBy=timers.target

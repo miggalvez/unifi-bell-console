@@ -1,0 +1,26 @@
+[Unit]
+Description=School Bell Console (validated local database backup)
+
+[Service]
+Type=oneshot
+User=bell
+Group=bell
+WorkingDirectory=/opt/bell-console/console
+ExecStart=/usr/bin/npm run backup:local
+Environment=NODE_ENV=production
+Environment=HOME=/tmp/bell-backup-home
+Environment=NPM_CONFIG_CACHE=/tmp/npm-cache
+UMask=0077
+PrivateNetwork=true
+PrivateTmp=true
+PrivateDevices=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+ReadWritePaths=/opt/bell-console/console/data /opt/bell-console/console/backups

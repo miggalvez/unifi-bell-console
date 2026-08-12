@@ -13,6 +13,9 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "backup:local": "tsx scripts/backup-local.ts",
+    "backup:offsite": "tsx scripts/backup-offsite.ts",
+    "backup:restore": "tsx scripts/restore-backup.ts",
     "create-admin": "tsx scripts/create-admin.ts",
     "seed-demo": "DB_PATH=data/demo.db tsx scripts/seed-demo.ts",
     "demo": "npm run seed-demo && DB_PATH=data/demo.db next dev -p 3001"

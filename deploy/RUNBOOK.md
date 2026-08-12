@@ -386,19 +386,87 @@ actually happens.
 Once bells are ringing and the reboot tests pass, take a Proxmox snapshot and
 label it clearly — `known-good-<date>`. That is your rollback point.
 
-The console backs its own database up daily (`VACUUM INTO backups/`, 14 kept),
-and there is a button in Settings. Those live on the same disk, so copy them
-somewhere else on a schedule — a NAS share or the Proxmox backup target.
+Backups are deliberately outside the scheduler worker. Restarting the worker
+must never create snapshots or consume retention.
+
+- `bell-backup-local.timer` runs at 03:15 school time, creates at most one
+  validated `VACUUM INTO` snapshot per date in `backups/daily/`, and retains
+  14 distinct dates. `Persistent=true` catches up after downtime.
+- The Settings button writes unpruned snapshots to `backups/manual/` and does
+  not mask timer failures.
+- Existing root-level `backups/bell-*.db` files are legacy recovery points and
+  are never pruned by the new jobs.
+- `bell-backup-offsite.timer` independently creates a fresh snapshot plus the
+  recording directory, validates both, and uploads an immutable bundle to R2
+  at 03:30. It retries failures after 30 minutes, at most three attempts per
+  23-hour window.
 
 What matters, in restore order:
 
 | | |
 |---|---|
-| `console/data/bell.db` | Everything: schedules, plans, recordings, users, audit trail |
+| `console/data/bell.db` | Schedules, plans, recording catalogue, users, audit trail |
+| `console/data/audio/` | Uploaded and browser-recorded audio bytes |
 | `console/.env` | Credentials. Not in the database, not in git |
-| `console/backups/` | Daily database snapshots |
+| `console/backups/` | Daily/manual snapshots and temporary off-site staging |
 
-To restore: stop both services, replace `data/bell.db`, start them again.
+Never raw-copy live `bell.db`: it uses WAL mode. The snapshot code uses
+`VACUUM INTO`, validates `integrity_check` and `foreign_key_check`, and only
+then atomically publishes the file.
+
+### Configure R2 and timers
+
+1. Create a private R2 Standard bucket named `slswi-bell-backups`. Do not
+   enable an `r2.dev` URL or custom domain.
+2. Add a bucket-lock rule for prefix `bell-console/` with 30-day retention.
+   Add a lifecycle rule that deletes the same prefix after 90 days. The lock
+   takes precedence for its first 30 days.
+3. Create an R2 API credential scoped to read/write this bucket only. Keep the
+   authoritative copy in the password manager; do not add it to `.env`.
+4. On the guest:
+
+```bash
+sudo apt-get install rclone
+sudo install -d -m 0750 -o root -g bell /etc/bell-console
+sudo cp /opt/bell-console/deploy/rclone.conf.example /etc/bell-console/rclone.conf
+sudo chown root:bell /etc/bell-console/rclone.conf
+sudo chmod 0640 /etc/bell-console/rclone.conf
+sudoedit /etc/bell-console/rclone.conf   # fill account id and bucket-scoped keys
+
+sudo cp /opt/bell-console/deploy/systemd/bell-backup-*.service /etc/systemd/system/
+sudo cp /opt/bell-console/deploy/systemd/bell-backup-*.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now bell-backup-local.timer bell-backup-offsite.timer
+```
+
+Run and inspect the first backups explicitly:
+
+```bash
+sudo systemctl start bell-backup-local.service
+sudo systemctl start bell-backup-offsite.service
+systemctl status bell-backup-local.service bell-backup-offsite.service
+systemctl list-timers 'bell-backup-*'
+```
+
+The R2 key is date-stamped and unique. `complete.json` is uploaded only after
+`rclone check --download` succeeds; restore tooling rejects any prefix without
+that marker. To prove a completed backup without touching production:
+
+```bash
+cd /opt/bell-console/console
+sudo -u bell -H npm run backup:restore -- verify bell-console/v1/YYYY/MM/DD/RUN-ID
+```
+
+Production application is intentionally harder and is not part of the first
+restore test. It requires root and the exact confirmation phrase, creates a
+local pre-restore safety bundle, validates the download before stopping either
+service, restores database and audio together, then verifies HTTP and the
+scheduler heartbeat. A failed apply automatically restores the safety bundle
+and verifies the services again:
+
+```bash
+sudo npm run backup:restore -- apply bell-console/v1/YYYY/MM/DD/RUN-ID --confirm RESTORE-PRODUCTION
+```
 
 ## Routine operations
 

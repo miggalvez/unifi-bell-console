@@ -1,8 +1,8 @@
 "use client";
 
-import { useActionState, useRef, useTransition } from "react";
+import { useActionState, useRef, useTransition, type ReactNode } from "react";
 import { toast } from "sonner";
-import { DatabaseBackup, KeyRound, Plus, ShieldAlert, ShieldCheck, Volume2 } from "lucide-react";
+import { Cloud, DatabaseBackup, HardDrive, KeyRound, Plus, ShieldAlert, ShieldCheck, Volume2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,6 +34,13 @@ export interface UserItem {
   role: "ADMIN" | "STAFF";
   canEmergency: boolean;
   isDisabled: boolean;
+}
+
+export interface BackupChannel {
+  lastAttempt: string;
+  lastSuccess: string;
+  error: string | null;
+  healthy: boolean;
 }
 
 const initial: SettingsResult = { ok: false };
@@ -277,6 +284,65 @@ export function SystemPanel({
             <Volume2 className="size-4" />
             {ttsRevalidate ? "Test spoken announcements now" : "Test a spoken announcement"}
           </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+export function BackupHealthPanel({
+  local,
+  offsite,
+  dailyCount,
+  latestRemoteKey,
+}: {
+  local: BackupChannel;
+  offsite: BackupChannel;
+  dailyCount: number;
+  latestRemoteKey: string | null;
+}) {
+  const [pending, startTransition] = useTransition();
+
+  const channel = (label: string, icon: ReactNode, value: BackupChannel, detail: string) => (
+    <div className="space-y-2 rounded-md border p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 font-medium">
+          {icon} {label}
+        </div>
+        <Badge variant={value.healthy ? "secondary" : "outline"} className={value.healthy ? "" : "text-destructive"}>
+          {value.healthy ? "Healthy" : "Needs attention"}
+        </Badge>
+      </div>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+        <dt className="text-muted-foreground">Last success</dt>
+        <dd>{value.lastSuccess}</dd>
+        <dt className="text-muted-foreground">Last attempt</dt>
+        <dd>{value.lastAttempt}</dd>
+        <dt className="text-muted-foreground">Retention</dt>
+        <dd>{detail}</dd>
+      </dl>
+      {value.error ? <p className="text-sm text-destructive">{value.error}</p> : null}
+    </div>
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Backup health</CardTitle>
+        <CardDescription>
+          Local and off-site backups are independent. A valid backup includes the database and every catalogued recording.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 lg:grid-cols-2">
+          {channel("Local daily snapshots", <HardDrive className="size-4" />, local, `${dailyCount} of 14 daily snapshots retained`)}
+          {channel("Cloudflare R2", <Cloud className="size-4" />, offsite, "30-day lock; expires after 90 days")}
+        </div>
+        {latestRemoteKey ? (
+          <p className="break-all text-xs text-muted-foreground">Latest completed R2 backup: {latestRemoteKey}</p>
+        ) : null}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+          <p className="text-sm text-muted-foreground">Manual backups are local-only and do not replace the daily or R2 jobs.</p>
           <Button
             variant="outline"
             size="sm"
@@ -284,12 +350,12 @@ export function SystemPanel({
             onClick={() =>
               startTransition(async () => {
                 const r = await backupNow();
-                if (r.ok) toast.success("Backup saved");
+                if (r.ok) toast.success("Manual local backup saved");
                 else toast.error(r.error ?? "Failed");
               })
             }
           >
-            <DatabaseBackup className="size-4" /> Save a backup now
+            <DatabaseBackup className="size-4" /> Save a manual local backup
           </Button>
         </div>
       </CardContent>

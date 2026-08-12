@@ -1,0 +1,35 @@
+[Unit]
+Description=School Bell Console (validated off-site R2 backup)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=23h
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+User=bell
+Group=bell
+WorkingDirectory=/opt/bell-console/console
+ExecStart=/usr/bin/npm run backup:offsite
+Environment=NODE_ENV=production
+Environment=HOME=/tmp/bell-backup-home
+Environment=NPM_CONFIG_CACHE=/tmp/npm-cache
+Environment=RCLONE_CONFIG=/etc/bell-console/rclone.conf
+Environment=RCLONE_CACHE_DIR=/tmp/rclone-cache
+Environment=BELL_BACKUP_REMOTE=bell-r2:slswi-bell-backups
+Restart=on-failure
+RestartSec=30min
+UMask=0077
+PrivateTmp=true
+PrivateDevices=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+ReadOnlyPaths=/etc/bell-console/rclone.conf
+ReadWritePaths=/opt/bell-console/console/data /opt/bell-console/console/backups

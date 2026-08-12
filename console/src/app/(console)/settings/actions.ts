@@ -1,7 +1,6 @@
 "use server";
 
 import { eq } from "drizzle-orm";
-import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { revalidatePath } from "next/cache";
 import { db, schema, sqlite } from "@/lib/db/client";
@@ -15,6 +14,7 @@ import { triggerManualRun } from "@/lib/scheduler/executor";
 import { localDateTimeParts } from "@/lib/scheduler/time";
 import { resolveTargetMacs } from "@/lib/zones";
 import { materialize } from "@/lib/scheduler/materializer";
+import { createManualSnapshot } from "@/lib/backup";
 
 export interface SettingsResult {
   ok: boolean;
@@ -133,14 +133,13 @@ export async function clearTtsFlag(): Promise<SettingsResult> {
 
 export async function backupNow(): Promise<SettingsResult> {
   const admin = await requireAdmin();
-  const dir = resolve(projectRoot, "backups");
-  mkdirSync(dir, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const path = resolve(dir, `bell-${stamp}.db`);
-  // VACUUM INTO produces a consistent snapshot even mid-WAL — never raw-copy.
-  sqlite.prepare("VACUUM INTO ?").run(path);
-  writeAudit({ userId: admin.id, action: "system.backup", detail: { path } });
-  return { ok: true };
+  try {
+    const result = createManualSnapshot({ sqlite, backupRoot: resolve(projectRoot, "backups") });
+    writeAudit({ userId: admin.id, action: "system.backup", detail: { path: result.path, kind: "manual" } });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: `Could not save the local backup: ${(error as Error).message}`.slice(0, 240) };
+  }
 }
 
 export async function getRetentionInfo(): Promise<{ horizonDays: number; missedGraceMinutes: number }> {

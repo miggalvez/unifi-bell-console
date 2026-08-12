@@ -1,0 +1,11 @@
+[Unit]
+Description=School Bell Console daily local backup timer
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 America/Chicago
+Persistent=true
+AccuracySec=1min
+Unit=bell-backup-local.service
+
+[Install]
+WantedBy=timers.target

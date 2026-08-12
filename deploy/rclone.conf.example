@@ -1,0 +1,7 @@
+[bell-r2]
+type = s3
+provider = Cloudflare
+access_key_id = REPLACE_WITH_BUCKET_SCOPED_ACCESS_KEY
+secret_access_key = REPLACE_WITH_BUCKET_SCOPED_SECRET_KEY
+endpoint = https://REPLACE_WITH_ACCOUNT_ID.r2.cloudflarestorage.com
+acl = private
