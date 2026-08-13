@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { sqlite } from "@/lib/db/client";
 import { projectRoot } from "@/env";
-import { stageBackupBundle, uploadBundle, utcStamp } from "@/lib/backup";
+import { pruneOffsiteStaging, stageBackupBundle, uploadBundle, utcStamp } from "@/lib/backup";
 import { recordBackupAttempt, recordBackupFailure, recordBackupSuccess } from "@/lib/backup-status";
 
 const remote = process.env.BELL_BACKUP_REMOTE ?? "bell-r2:slswi-bell-backups";
@@ -34,6 +34,10 @@ function main(): void {
   const now = new Date();
   const stagingRoot = resolve(projectRoot, "backups", "offsite-staging");
   mkdirSync(stagingRoot, { recursive: true, mode: 0o700 });
+  const startupCleanup = pruneOffsiteStaging(stagingRoot);
+  if (startupCleanup.removed.length > 0) {
+    console.log(`[backup-offsite] removed ${startupCleanup.removed.length} abandoned staging bundle(s)`);
+  }
   const prefix = remotePrefix(now);
   let successfulStage: string | null = null;
 
@@ -62,9 +66,14 @@ function main(): void {
 
     recordBackupSuccess("offsite", { remoteKey: prefix });
     rmSync(successfulStage, { recursive: true, force: true });
+    pruneOffsiteStaging(stagingRoot, { keep: 0 });
     console.log(`[backup-offsite] uploaded and verified ${target}`);
   } catch (error) {
     recordBackupFailure("offsite", error);
+    const cleanup = pruneOffsiteStaging(stagingRoot, { keep: 1 });
+    if (cleanup.retained.length > 0) {
+      console.error(`[backup-offsite] retained newest failed staging bundle for diagnostics: ${cleanup.retained[0]}`);
+    }
     throw error;
   }
 }

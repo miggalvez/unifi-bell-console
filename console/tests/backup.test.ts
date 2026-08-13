@@ -8,6 +8,7 @@ import {
   readFileSync,
   rmSync,
   unlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,6 +18,7 @@ import {
   createDailySnapshot,
   createManualSnapshot,
   createValidatedSnapshot,
+  pruneOffsiteStaging,
   stageBackupBundle,
   uploadBundle,
   validateBundle,
@@ -126,10 +128,43 @@ describe("off-site backup bundles", () => {
     const audio = resolve(root, "audio");
     mkdirSync(audio);
     source.prepare("INSERT INTO audio_files (stored_name, size_bytes) VALUES (?, ?)").run("missing.mp3", 1);
-    expect(() =>
-      stageBackupBundle({ sqlite: source, sourceAudioDir: audio, stageDir: resolve(root, "stage"), gitCommit: "abc123" }),
-    ).toThrow(/disappeared/);
+    const stage = resolve(root, "stage");
+    expect(() => stageBackupBundle({ sqlite: source, sourceAudioDir: audio, stageDir: stage, gitCommit: "abc123" })).toThrow(
+      /disappeared/,
+    );
+    expect(existsSync(stage)).toBe(false);
     source.close();
+  });
+
+  it("bounds failed off-site staging and sweeps stale interrupted bundles", () => {
+    const root = tempDir();
+    const stagingRoot = resolve(root, "offsite-staging");
+    mkdirSync(stagingRoot);
+    const stale = "2026-07-01T03-30-00-000Z-attempt-1";
+    const olderFresh = "2026-08-11T03-30-00-000Z-attempt-1";
+    const newestFresh = "2026-08-12T03-30-00-000Z-attempt-1";
+    for (const name of [stale, olderFresh, newestFresh]) {
+      const path = resolve(stagingRoot, name);
+      mkdirSync(path);
+      writeFileSync(resolve(path, "bell.db"), name);
+    }
+    mkdirSync(resolve(stagingRoot, "operator-notes"));
+    utimesSync(resolve(stagingRoot, stale), new Date("2026-07-01T03:30:00Z"), new Date("2026-07-01T03:30:00Z"));
+
+    const result = pruneOffsiteStaging(stagingRoot, {
+      keep: 1,
+      maxAgeMs: 7 * 24 * 60 * 60_000,
+      now: new Date("2026-08-12T12:00:00Z").getTime(),
+    });
+    expect(result.removed).toEqual([olderFresh, stale].sort());
+    expect(result.retained).toEqual([newestFresh]);
+    expect(existsSync(resolve(stagingRoot, stale))).toBe(false);
+    expect(existsSync(resolve(stagingRoot, olderFresh))).toBe(false);
+    expect(existsSync(resolve(stagingRoot, newestFresh))).toBe(true);
+    expect(existsSync(resolve(stagingRoot, "operator-notes"))).toBe(true);
+
+    expect(pruneOffsiteStaging(stagingRoot, { keep: 0 }).retained).toEqual([]);
+    expect(existsSync(resolve(stagingRoot, newestFresh))).toBe(false);
   });
 
   it("rejects incomplete, tampered, and corrupt bundles", () => {

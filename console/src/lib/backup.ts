@@ -19,8 +19,10 @@ import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
 export const DAILY_BACKUP_RETENTION = 14;
 export const BACKUP_FORMAT_VERSION = 1;
+export const OFFSITE_FAILED_STAGE_RETENTION_MS = 7 * 24 * 60 * 60_000;
 
 const DAILY_NAME = /^bell-(\d{4}-\d{2}-\d{2})\.db$/;
+const OFFSITE_STAGE_NAME = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-attempt-\d+$/;
 const STALE_TEMP_MS = 24 * 60 * 60_000;
 
 export interface SnapshotResult {
@@ -83,6 +85,48 @@ function cleanupStaleTemps(dir: string, prefix: string, now = Date.now()): void 
       // A concurrent job may already have removed it.
     }
   }
+}
+
+/** Bound diagnostic staging after failed or interrupted off-site jobs. */
+export function pruneOffsiteStaging(
+  stagingRoot: string,
+  options: { keep?: number; maxAgeMs?: number; now?: number } = {},
+): { removed: string[]; retained: string[] } {
+  if (!existsSync(stagingRoot)) return { removed: [], retained: [] };
+  const keep = Math.max(0, options.keep ?? 1);
+  const maxAgeMs = options.maxAgeMs ?? OFFSITE_FAILED_STAGE_RETENTION_MS;
+  const now = options.now ?? Date.now();
+  const removed: string[] = [];
+  const fresh: string[] = [];
+
+  for (const entry of readdirSync(stagingRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !OFFSITE_STAGE_NAME.test(entry.name)) continue;
+    const path = join(stagingRoot, entry.name);
+    try {
+      if (now - statSync(path).mtimeMs > maxAgeMs) {
+        rmSync(path, { recursive: true, force: true });
+        removed.push(entry.name);
+      } else {
+        fresh.push(entry.name);
+      }
+    } catch {
+      // A concurrent cleanup may already have removed it.
+    }
+  }
+
+  fresh.sort().reverse();
+  for (const name of fresh.slice(keep)) {
+    try {
+      rmSync(join(stagingRoot, name), { recursive: true, force: true });
+      removed.push(name);
+    } catch {
+      // A concurrent cleanup may already have removed it.
+    }
+  }
+  return {
+    removed: removed.sort(),
+    retained: fresh.slice(0, keep).filter((name) => existsSync(join(stagingRoot, name))),
+  };
 }
 
 export function validateSnapshot(path: string): void {
@@ -282,44 +326,50 @@ export function stageBackupBundle(options: {
   gitCommit: string;
   createdAt?: Date;
 }): BackupManifest {
+  if (existsSync(options.stageDir)) throw new Error(`Backup staging directory already exists: ${options.stageDir}`);
   mkdirSync(options.stageDir, { recursive: true });
-  const snapshotPath = resolve(options.stageDir, "bell.db");
-  createValidatedSnapshot(options.sqlite, snapshotPath);
+  try {
+    const snapshotPath = resolve(options.stageDir, "bell.db");
+    createValidatedSnapshot(options.sqlite, snapshotPath);
 
-  const stagedAudio = resolve(options.stageDir, "audio");
-  if (existsSync(options.sourceAudioDir)) cpSync(options.sourceAudioDir, stagedAudio, { recursive: true });
-  else mkdirSync(stagedAudio, { recursive: true });
+    const stagedAudio = resolve(options.stageDir, "audio");
+    if (existsSync(options.sourceAudioDir)) cpSync(options.sourceAudioDir, stagedAudio, { recursive: true });
+    else mkdirSync(stagedAudio, { recursive: true });
 
-  const catalogue = cataloguedAudio(snapshotPath);
-  const stagedNames = new Set(listFiles(stagedAudio).map((path) => safeRelativePath(stagedAudio, path)));
-  for (const storedName of catalogue) {
-    if (!stagedNames.has(storedName)) throw new Error(`Catalogued recording disappeared during backup: ${storedName}`);
+    const catalogue = cataloguedAudio(snapshotPath);
+    const stagedNames = new Set(listFiles(stagedAudio).map((path) => safeRelativePath(stagedAudio, path)));
+    for (const storedName of catalogue) {
+      if (!stagedNames.has(storedName)) throw new Error(`Catalogued recording disappeared during backup: ${storedName}`);
+    }
+
+    const manifest: BackupManifest = {
+      formatVersion: BACKUP_FORMAT_VERSION,
+      createdAt: (options.createdAt ?? new Date()).toISOString(),
+      sourceHost: hostname(),
+      gitCommit: options.gitCommit,
+      database: {
+        path: "bell.db",
+        sizeBytes: statSync(snapshotPath).size,
+        sha256: sha256File(snapshotPath),
+        tableCounts: tableCounts(snapshotPath),
+      },
+      audio: listFiles(stagedAudio).map((path) => {
+        const relativePath = safeRelativePath(stagedAudio, path);
+        return {
+          path: relativePath,
+          sizeBytes: statSync(path).size,
+          sha256: sha256File(path),
+          catalogued: catalogue.has(relativePath),
+        };
+      }),
+    };
+    writeFileSync(resolve(options.stageDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
+    validateBundle(options.stageDir, false);
+    return manifest;
+  } catch (error) {
+    rmSync(options.stageDir, { recursive: true, force: true });
+    throw error;
   }
-
-  const manifest: BackupManifest = {
-    formatVersion: BACKUP_FORMAT_VERSION,
-    createdAt: (options.createdAt ?? new Date()).toISOString(),
-    sourceHost: hostname(),
-    gitCommit: options.gitCommit,
-    database: {
-      path: "bell.db",
-      sizeBytes: statSync(snapshotPath).size,
-      sha256: sha256File(snapshotPath),
-      tableCounts: tableCounts(snapshotPath),
-    },
-    audio: listFiles(stagedAudio).map((path) => {
-      const relativePath = safeRelativePath(stagedAudio, path);
-      return {
-        path: relativePath,
-        sizeBytes: statSync(path).size,
-        sha256: sha256File(path),
-        catalogued: catalogue.has(relativePath),
-      };
-    }),
-  };
-  writeFileSync(resolve(options.stageDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
-  validateBundle(options.stageDir, false);
-  return manifest;
 }
 
 export function writeCompleteMarker(bundleDir: string, completedAt = new Date()): CompleteMarker {

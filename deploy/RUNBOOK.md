@@ -400,6 +400,9 @@ must never create snapshots or consume retention.
   recording directory, validates both, and uploads an immutable bundle to R2
   at 03:30. It retries failures after 30 minutes, at most three attempts per
   23-hour window.
+- Incomplete staging attempts are removed immediately. At most the newest
+  validated failed-upload bundle is retained for diagnostics, for no longer
+  than seven days; the next successful upload clears all off-site staging.
 
 What matters, in restore order:
 
