@@ -5,3 +5,5 @@ access_key_id = REPLACE_WITH_BUCKET_SCOPED_ACCESS_KEY
 secret_access_key = REPLACE_WITH_BUCKET_SCOPED_SECRET_KEY
 endpoint = https://REPLACE_WITH_ACCOUNT_ID.r2.cloudflarestorage.com
 acl = private
+# Required for object-only R2 credentials, which cannot inspect bucket settings.
+no_check_bucket = true

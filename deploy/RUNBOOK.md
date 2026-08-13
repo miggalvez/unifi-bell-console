@@ -422,7 +422,9 @@ then atomically publishes the file.
    Add a lifecycle rule that deletes the same prefix after 90 days. The lock
    takes precedence for its first 30 days.
 3. Create an R2 API credential scoped to read/write this bucket only. Keep the
-   authoritative copy in the password manager; do not add it to `.env`.
+   authoritative copy in the password manager; do not add it to `.env`. The
+   Rclone config must keep `no_check_bucket = true`: object-only credentials
+   cannot perform Rclone's preliminary bucket-settings check.
 4. On the guest:
 
 ```bash
