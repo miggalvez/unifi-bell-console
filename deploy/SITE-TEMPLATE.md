@@ -49,14 +49,17 @@ sheet records where things are and who to call, not how to authenticate.
 | Console reachable at | |
 | Speakers on same VLAN as console? | |
 
-## HTTPS and browser recording
+## HTTPS, browser recording and the staff phone app
 
-Browser microphone recording only works on a secure origin. If staff record
-announcements from their own machines, this section must be filled in.
+Browser microphone recording and the installable phone app both need a secure
+origin. If staff record announcements from their own machines, or carry the
+phone app, this section must be filled in.
 
 | | |
 |---|---|
 | Staff record announcements in the browser? | |
+| Phone app URL (`https://<hostname>/m`) | |
+| Phones with the app installed (who) | |
 | Hostname | |
 | Certificate method (public CA / internal CA / self-signed) | |
 | DNS provider + where the API token lives | |

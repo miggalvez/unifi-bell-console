@@ -18,6 +18,7 @@
     "backup:restore": "tsx scripts/restore-backup.ts",
     "create-admin": "tsx scripts/create-admin.ts",
     "seed-demo": "DB_PATH=data/demo.db tsx scripts/seed-demo.ts",
+    "make-icons": "tsx scripts/make-icons.ts",
     "demo": "npm run seed-demo && DB_PATH=data/demo.db next dev -p 3001"
   },
   "dependencies": {
@@ -54,6 +55,7 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
+    "sharp": "^0.35.3",
     "tailwindcss": "^4",
     "tsx": "^4.23.9",
     "typescript": "^5",

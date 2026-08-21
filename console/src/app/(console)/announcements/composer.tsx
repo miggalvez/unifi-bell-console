@@ -55,8 +55,9 @@ export function Composer({ zones }: { zones: ZoneOption[] }) {
             />
             <p className="text-right text-xs text-muted-foreground">{chars}/{TTS_MAX_CHARS}</p>
           </div>
-          <div className="flex items-end gap-4">
-            <Field label="Speakers" htmlFor="ann-zone" className="w-44">
+          {/* Two columns on a phone, one row from sm up — the desktop is unchanged. */}
+          <div className="grid grid-cols-2 gap-3 sm:flex sm:items-end sm:gap-4">
+            <Field label="Speakers" htmlFor="ann-zone" className="sm:w-44">
               <SelectField
                 id="ann-zone"
                 name="zoneId"
@@ -67,7 +68,7 @@ export function Composer({ zones }: { zones: ZoneOption[] }) {
                 ]}
               />
             </Field>
-            <Field label="Voice" htmlFor="ann-tone" className="w-36">
+            <Field label="Voice" htmlFor="ann-tone" className="sm:w-36">
               <SelectField
                 id="ann-tone"
                 name="tone"
@@ -75,7 +76,7 @@ export function Composer({ zones }: { zones: ZoneOption[] }) {
                 options={[...TTS_TONES]}
               />
             </Field>
-            <Button type="submit" disabled={pending} className="ml-auto">
+            <Button type="submit" disabled={pending} className="col-span-2 h-11 sm:col-auto sm:ml-auto sm:h-9">
               {pending ? <Loader2 className="size-4 animate-spin" /> : <Megaphone className="size-4" />}
               {pending ? "Speaking…" : "Announce"}
             </Button>
@@ -117,7 +118,8 @@ function PresetTile({ cue }: { cue: CueRow }) {
           else toast.error(`"${cue.name}": ${r.message ?? r.status}`);
         })
       }
-      className="flex items-center gap-3 rounded-lg border bg-card p-4 text-left shadow-xs transition-colors hover:border-primary/40 hover:bg-accent disabled:opacity-60"
+      // touch-manipulation: no double-tap-to-zoom delay on a phone.
+      className="flex min-h-14 touch-manipulation items-center gap-3 rounded-lg border bg-card p-4 text-left shadow-xs transition-colors hover:border-primary/40 hover:bg-accent disabled:opacity-60"
     >
       {pending ? (
         <Loader2 className="size-5 shrink-0 animate-spin text-primary" />

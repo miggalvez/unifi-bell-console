@@ -1,12 +1,20 @@
 import { count } from "drizzle-orm";
 import { BellRing } from "lucide-react";
+import { redirect } from "next/navigation";
 import { db, schema } from "@/lib/db/client";
+import { getSessionUser } from "@/lib/auth/session";
+import { safeNextPath } from "@/lib/auth/routing";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LoginForm, BootstrapForm } from "./login-form";
 
 export const dynamic = "force-dynamic";
 
-export default function LoginPage() {
+export default async function LoginPage({ searchParams }: PageProps<"/login">) {
+  const next = safeNextPath((await searchParams).next);
+  // The real "already signed in" check. The proxy only sees that a cookie
+  // exists; a stale one must land here and get the form, not a redirect.
+  if (await getSessionUser()) redirect(next);
+
   const users = db.select({ n: count() }).from(schema.users).get();
   const firstRun = (users?.n ?? 0) === 0;
 
@@ -26,7 +34,7 @@ export default function LoginPage() {
                 : "Sign in with your staff account."}
             </CardDescription>
           </CardHeader>
-          <CardContent>{firstRun ? <BootstrapForm /> : <LoginForm />}</CardContent>
+          <CardContent>{firstRun ? <BootstrapForm next={next} /> : <LoginForm next={next} />}</CardContent>
         </Card>
       </div>
     </main>

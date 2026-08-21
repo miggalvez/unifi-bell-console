@@ -62,7 +62,23 @@ Speak an announcement): record, listen back, then send. Recordings are streamed
 through the same talkback path and are discarded unless explicitly saved to the
 library. **Requires a secure origin** — browsers block microphone access over
 plain HTTP except on localhost, so this works on the console machine itself and
-on any device once the box is served over HTTPS.
+on any device once the box is served over HTTPS. The phone app below needs
+HTTPS for the same reason.
+
+**Staff phone app.** `/m` is a cut-down view built for a phone: the saved
+announcement tiles, the emergency tiles, the typed message, and the Stop bar —
+nothing else. Staff open `https://<host>/m` once and add it to their home
+screen (iPhone: Safari → Share → *Add to Home Screen*; Android: Chrome → ⋮ →
+*Add to Home screen*), after which it launches like an app. Two things to
+know: it needs the console served over **HTTPS** (browsers refuse to install
+from plain HTTP), and on an iPhone the installed app has its own sign-in — the
+first launch asks for a password even if Safari is already signed in, and then
+stays signed in for as long as it is used. Off the school network the app
+shows a plain "can't reach the console" page instead of a browser error.
+Nothing is cached: what you see is always live. Deliberately left out:
+recording with the microphone, the schedule, and drills — the full console is
+one tap away at the bottom of the page, and "Phone view" in the sidebar leads
+back.
 
 **Repeating emergency alerts.** An emergency announcement can be set to repeat
 until stopped (Announcements → Emergency → press and hold → *Repeat until

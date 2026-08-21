@@ -39,7 +39,7 @@ export function AlertBanner() {
 
   return (
     <div className="sticky top-0 z-40 border-b border-emergency bg-emergency text-emergency-foreground">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-6 py-3">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-6">
         <span className="relative flex size-3 shrink-0" aria-hidden>
           <span className="absolute inline-flex size-full animate-ping rounded-full bg-emergency-foreground opacity-75" />
           <span className="relative inline-flex size-3 rounded-full bg-emergency-foreground" />
@@ -55,7 +55,7 @@ export function AlertBanner() {
         </span>
         <Button
           size="sm"
-          className="ml-auto gap-1.5 bg-emergency-foreground text-emergency shadow-xs hover:bg-emergency-foreground/90"
+          className="ml-auto h-10 gap-1.5 bg-emergency-foreground text-emergency shadow-xs hover:bg-emergency-foreground/90 sm:h-8"
           disabled={pending}
           onClick={() =>
             startTransition(async () => {

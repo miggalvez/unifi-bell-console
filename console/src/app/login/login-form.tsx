@@ -8,10 +8,12 @@ import { login, bootstrapAdmin, type AuthFormState } from "./actions";
 
 const initialState: AuthFormState = {};
 
-export function LoginForm() {
+/** `next`: already validated by the page; it rides along as a hidden field. */
+export function LoginForm({ next }: { next: string }) {
   const [state, action, pending] = useActionState(login, initialState);
   return (
     <form action={action} className="space-y-4">
+      <input type="hidden" name="next" value={next} />
       <div className="space-y-2">
         <Label htmlFor="username">Username</Label>
         <Input id="username" name="username" autoComplete="username" autoFocus required />
@@ -28,10 +30,11 @@ export function LoginForm() {
   );
 }
 
-export function BootstrapForm() {
+export function BootstrapForm({ next }: { next: string }) {
   const [state, action, pending] = useActionState(bootstrapAdmin, initialState);
   return (
     <form action={action} className="space-y-4">
+      <input type="hidden" name="next" value={next} />
       <div className="space-y-2">
         <Label htmlFor="username">Username</Label>
         <Input id="username" name="username" autoComplete="username" autoFocus required />

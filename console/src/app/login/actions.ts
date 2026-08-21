@@ -11,6 +11,7 @@ import {
   destroySessionByToken,
   sessionCookieOptions,
 } from "@/lib/auth/session";
+import { safeNextPath } from "@/lib/auth/routing";
 import { writeAudit } from "@/lib/audit";
 
 export interface AuthFormState {
@@ -32,7 +33,7 @@ export async function login(_prev: AuthFormState, formData: FormData): Promise<A
   const { token, expiresAt } = createSession(user.id);
   (await cookies()).set(SESSION_COOKIE, token, sessionCookieOptions(expiresAt));
   writeAudit({ userId: user.id, action: "auth.login" });
-  redirect("/");
+  redirect(safeNextPath(formData.get("next")));
 }
 
 export async function bootstrapAdmin(
@@ -81,13 +82,15 @@ export async function bootstrapAdmin(
   writeAudit({ userId: created!.id, action: "user.bootstrap_admin", detail: { username } });
   const { token, expiresAt } = createSession(created!.id);
   (await cookies()).set(SESSION_COOKIE, token, sessionCookieOptions(expiresAt));
-  redirect("/");
+  redirect(safeNextPath(formData.get("next")));
 }
 
-export async function logout(): Promise<void> {
+export async function logout(formData?: FormData): Promise<void> {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;
   if (token) destroySessionByToken(token);
   store.delete(SESSION_COOKIE);
-  redirect("/login");
+  // Signing out inside the phone app should come back to the phone app.
+  const next = safeNextPath(formData?.get("next"));
+  redirect(next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`);
 }

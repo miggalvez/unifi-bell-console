@@ -1,4 +1,5 @@
-import { BellRing, LogOut } from "lucide-react";
+import Link from "next/link";
+import { BellRing, LogOut, Smartphone } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { logout } from "@/app/login/actions";
 import { Nav } from "@/components/nav";
@@ -34,6 +35,15 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
               {user.role === "ADMIN" ? "Administrator" : "Staff"}
             </p>
           </div>
+          {/* Inside the installed phone app there is no back button, so the
+              desktop console needs its own way back to the phone view. */}
+          <Link
+            href="/m"
+            prefetch={false}
+            className="flex h-8 items-center gap-2 rounded-lg px-2.5 text-[0.8rem] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <Smartphone className="size-4" /> Phone view
+          </Link>
           <form action={logout}>
             <Button type="submit" variant="ghost" size="sm" className="w-full justify-start gap-2 text-muted-foreground">
               <LogOut className="size-4" /> Sign out
