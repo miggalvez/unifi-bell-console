@@ -60,17 +60,34 @@ export async function createUser(_prev: SettingsResult, formData: FormData): Pro
 
 export async function updateUser(
   userId: number,
-  patch: { role?: "ADMIN" | "STAFF"; canEmergency?: boolean; isDisabled?: boolean },
+  patch: {
+    displayName?: string;
+    role?: "ADMIN" | "STAFF";
+    canEmergency?: boolean;
+    isDisabled?: boolean;
+  },
 ): Promise<SettingsResult> {
   const admin = await requireAdmin();
   if (userId === admin.id && (patch.isDisabled || patch.role === "STAFF")) {
     return { ok: false, error: "You cannot demote or disable your own account." };
   }
-  db.update(schema.users).set({ ...patch, updatedAt: Date.now() }).where(eq(schema.users.id, userId)).run();
+
+  // Normalize here rather than trusting the caller: this action is a public
+  // entry point, not just the settings dialog's private helper.
+  const changes = { ...patch };
+  if (changes.displayName !== undefined) {
+    const displayName = changes.displayName.trim();
+    if (displayName.length < 1 || displayName.length > 64) {
+      return { ok: false, error: "Name must be 1–64 characters." };
+    }
+    changes.displayName = displayName;
+  }
+
+  db.update(schema.users).set({ ...changes, updatedAt: Date.now() }).where(eq(schema.users.id, userId)).run();
   if (patch.isDisabled) {
     db.delete(schema.sessions).where(eq(schema.sessions.userId, userId)).run();
   }
-  writeAudit({ userId: admin.id, action: "user.update", targetType: "user", targetId: userId, detail: patch });
+  writeAudit({ userId: admin.id, action: "user.update", targetType: "user", targetId: userId, detail: changes });
   revalidatePath("/settings");
   return { ok: true };
 }

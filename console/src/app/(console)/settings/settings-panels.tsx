@@ -1,12 +1,22 @@
 "use client";
 
-import { useActionState, useRef, useTransition, type ReactNode } from "react";
+import { useActionState, useRef, useState, useTransition, type ReactElement, type ReactNode } from "react";
 import { toast } from "sonner";
-import { Cloud, DatabaseBackup, HardDrive, KeyRound, Plus, ShieldAlert, ShieldCheck, Volume2 } from "lucide-react";
+import { Cloud, DatabaseBackup, HardDrive, KeyRound, Pencil, Plus, ShieldAlert, ShieldCheck, Volume2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { CheckboxField, Field, SelectField } from "@/components/fields";
 import { DatePicker } from "@/components/pickers";
 import {
@@ -150,28 +160,31 @@ function UserRow({ user, isSelf }: { user: UserItem; isSelf: boolean }) {
         />
       </TableCell>
       <TableCell>
-        <button
-          type="button"
-          disabled={pending}
-          onClick={() => patch({ canEmergency: !user.canEmergency })}
-          title="Click to change emergency permission"
-        >
-          {user.canEmergency ? (
-            <Badge className="border-transparent bg-destructive/10 text-destructive">
-              <ShieldAlert className="size-3" /> Allowed
-            </Badge>
-          ) : (
-            <Badge variant="outline">
-              <ShieldCheck className="size-3" /> No
-            </Badge>
-          )}
-        </button>
+        {/* Status only. Emergency permission is changed in Edit, behind an
+            explicit Save — a stray click on a badge should not grant it. */}
+        {user.canEmergency ? (
+          <Badge className="border-transparent bg-destructive/10 text-destructive">
+            <ShieldAlert className="size-3" /> Allowed
+          </Badge>
+        ) : (
+          <Badge variant="outline">
+            <ShieldCheck className="size-3" /> No
+          </Badge>
+        )}
       </TableCell>
       <TableCell>
         {user.isDisabled ? <Badge variant="outline">Disabled</Badge> : <Badge variant="secondary">Active</Badge>}
       </TableCell>
       <TableCell>
         <div className="flex justify-end gap-1.5">
+          <EditUserDialog
+            user={user}
+            trigger={
+              <Button variant="ghost" size="sm" disabled={pending}>
+                <Pencil className="size-4" /> Edit
+              </Button>
+            }
+          />
           <Button
             variant="ghost"
             size="sm"
@@ -201,6 +214,93 @@ function UserRow({ user, isSelf }: { user: UserItem; isSelf: boolean }) {
         </div>
       </TableCell>
     </TableRow>
+  );
+}
+
+/** Edits the person's name and emergency permission together, behind a Save. */
+function EditUserDialog({ user, trigger }: { user: UserItem; trigger: ReactElement }) {
+  const [open, setOpen] = useState(false);
+  const [displayName, setDisplayName] = useState(user.displayName);
+  const [canEmergency, setCanEmergency] = useState(user.canEmergency);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  // Reopening shows the row's current values, not whatever was typed and
+  // abandoned last time.
+  const onOpenChange = (next: boolean) => {
+    if (next) {
+      setDisplayName(user.displayName);
+      setCanEmergency(user.canEmergency);
+      setError(null);
+    }
+    setOpen(next);
+  };
+
+  const save = () => {
+    const name = displayName.trim();
+    if (!name) {
+      setError("Name cannot be empty.");
+      return;
+    }
+    startTransition(async () => {
+      const r = await updateUser(user.id, { displayName: name, canEmergency });
+      if (r.ok) {
+        toast.success("Saved");
+        setOpen(false);
+      } else {
+        setError(r.error ?? "Failed");
+      }
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogTrigger render={trigger} />
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Edit {user.username}</DialogTitle>
+          <DialogDescription>
+            The name is what staff see across the console. The username used to sign in cannot be
+            changed here.
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save();
+          }}
+        >
+          <div className="space-y-2">
+            <Label htmlFor={`user-name-${user.id}`}>Name</Label>
+            <Input
+              id={`user-name-${user.id}`}
+              value={displayName}
+              maxLength={64}
+              onChange={(e) => setDisplayName(e.target.value)}
+              autoFocus
+            />
+          </div>
+          <CheckboxField
+            id={`user-emergency-${user.id}`}
+            label="Can play emergency announcements"
+            description="Granted separately from the role"
+            checked={canEmergency}
+            onCheckedChange={setCanEmergency}
+            disabled={pending}
+          />
+          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={pending}>
+              Save
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
