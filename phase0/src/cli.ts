@@ -6,6 +6,7 @@
  *   test-sound <target>           official per-speaker test sound (target: all | name | id | mac)
  *   webhook <id> [--count N]      trigger an Alarm Manager webhook repeatedly, latency stats
  *   tts "<text>" [--speakers ..]  private native TTS (combined | separate | parallel modes)
+ *   watch-events                  subscribe to the Integration API event stream (fob/sensor probe)
  *   version-check                 detect Protect/firmware changes since last discover
  */
 import { parseArgs } from "node:util";
@@ -13,6 +14,7 @@ import { config, requirePrivateCreds } from "./config.js";
 import { latencyStats, round, sleep } from "./http.js";
 import { record, saveJson, loadState, saveState } from "./log.js";
 import * as official from "./official.js";
+import * as events from "./events.js";
 import { PrivateSession, type PrivateSpeaker } from "./private.js";
 
 const HELP = `UniFi Bell Console — Phase 0 harness
@@ -39,6 +41,17 @@ Commands
       combined  = one action listing every speaker (default; best sync bet)
       separate  = one action per speaker inside one automation
       parallel  = one HTTP request per speaker, fired simultaneously
+
+  watch-events [--devices] [--seconds N] [--raw] [--quiet]
+      Subscribe to the Integration API event stream and print every frame:
+      wss://<host>/proxy/protect/integration/v1/subscribe/events
+      This is the INBOUND path — how a SuperLink key fob press, or any sensor,
+      would reach the console. Run it with no hardware to prove the endpoint
+      and auth work; run it with a fob in hand to learn the button identifiers.
+      --devices  subscribe to /v1/subscribe/devices instead (add/update/remove)
+      --seconds  stop automatically after N seconds (default: until Ctrl-C)
+      --raw      print each frame's full JSON, not a one-line summary
+      --quiet    print only the closing summary
 
   version-check
       Compare Protect version + speaker firmware against the last discover.
@@ -283,6 +296,183 @@ async function cmdTts(args: string[]): Promise<void> {
   }
 }
 
+// ------------------------------------------------------------ watch-events
+
+/** Every arrival of one (device, field, value) triple, so repeats are visible. */
+interface PressSeries {
+  device: string;
+  path: string;
+  value: string;
+  atMs: number[];
+}
+
+/** Storage cap — the probe may be left running for hours; counting continues past it. */
+const MAX_KEPT_FRAMES = 5_000;
+
+/** Below this, two frames are more likely one press reported twice than two presses. */
+const DEDUPE_SUSPICION_MS = 1_500;
+
+/** The payload's own kind — the discriminator a fob press would be identified by. */
+function payloadType(payload: unknown): string {
+  const wanted = ["type", "eventType", "modelKey"];
+  for (const leaf of events.leaves(payload)) {
+    const seg = leaf.path.split(".").pop()?.replace(/\[\d+\]$/, "").toLowerCase() ?? "";
+    if (wanted.includes(seg) && leaf.value !== null && leaf.value !== "") return String(leaf.value);
+  }
+  return "(untyped)";
+}
+
+function fmtGap(ms: number): string {
+  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
+async function cmdWatchEvents(args: string[]): Promise<void> {
+  const { values } = parseArgs({
+    args,
+    options: {
+      devices: { type: "boolean", default: false },
+      seconds: { type: "string" },
+      raw: { type: "boolean", default: false },
+      quiet: { type: "boolean", default: false },
+    },
+  });
+  const path = values.devices ? events.SUBSCRIBE_DEVICES : events.SUBSCRIBE_EVENTS;
+  const seconds = values.seconds === undefined ? 0 : Number(values.seconds);
+  if (values.seconds !== undefined && (!Number.isFinite(seconds) || seconds <= 0)) {
+    console.error(`--seconds must be a positive number, got "${values.seconds}"`);
+    process.exit(1);
+  }
+
+  console.log(`Console: ${config.host}`);
+  console.log(`Subscribing to ${path}${seconds > 0 ? ` for ${seconds}s` : ""} — Ctrl-C to stop.\n`);
+  if (!values.devices) {
+    console.log("With a fob in hand: press each button once, ~3s apart, in a written-down order.");
+    console.log("With no SuperLink hardware yet: any camera or speaker activity still proves");
+    console.log("the endpoint, the key, and the envelope — which is the part worth knowing first.\n");
+  }
+
+  const kept: events.Frame[] = [];
+  const typeCounts = new Map<string, number>();
+  const presses = new Map<string, PressSeries>();
+  let total = 0;
+  const startedAt = Date.now();
+
+  const handle = events.watchEvents({
+    path,
+    onStatus: (msg) => console.log(`  ${msg}`),
+    onFrame: (frame) => {
+      total++;
+      if (kept.length < MAX_KEPT_FRAMES) kept.push(frame);
+
+      if (frame.kind !== "json") {
+        if (!values.quiet) {
+          console.log(
+            `  ${((frame.ms / 1000).toFixed(1) + "s").padStart(7)}  ${frame.kind.padEnd(6)} ${String(frame.size).padStart(5)}B  ${frame.text ?? frame.hex ?? ""}`.slice(0, 200),
+          );
+        }
+        return;
+      }
+
+      const { action, payload } = events.envelope(frame.json);
+      const type = action ? `${action} / ${payloadType(payload)}` : payloadType(payload);
+      typeCounts.set(type, (typeCounts.get(type) ?? 0) + 1);
+
+      const hits = events.buttonHits(payload);
+      const device = events.deviceLabel(payload);
+      for (const hit of hits) {
+        const key = `${device}|${hit.path}|${hit.value}`;
+        const series = presses.get(key) ?? { device, path: hit.path, value: hit.value, atMs: [] };
+        series.atMs.push(frame.ms);
+        presses.set(key, series);
+        // Individually recorded: a button press is the evidence this probe exists for.
+        record({ cmd: "watch-events", kind: "button", device, path: hit.path, value: hit.value, at: frame.at, ms: round(frame.ms) });
+      }
+
+      if (values.quiet) return;
+      if (values.raw) {
+        console.log(`\n  --- ${((frame.ms / 1000).toFixed(1))}s  ${frame.size}B ---`);
+        console.log(JSON.stringify(frame.json, null, 2));
+        return;
+      }
+      const mark = hits.length > 0 ? "  << BUTTON" : "";
+      console.log(
+        `  ${((frame.ms / 1000).toFixed(1) + "s").padStart(7)}  ${(action ?? "-").padEnd(6)} ${String(frame.size).padStart(5)}B  ${events.summarize(payload)}${mark}`,
+      );
+    },
+  });
+
+  if (seconds > 0) setTimeout(() => handle.close(), seconds * 1000).unref();
+  process.on("SIGINT", () => {
+    console.log("");
+    handle.close();
+  });
+  await handle.closed;
+
+  // ------------------------------------------------------------- summary
+
+  const elapsed = (Date.now() - startedAt) / 1000;
+  console.log(`\nStopped after ${elapsed.toFixed(0)}s — ${total} frame(s) received.`);
+  if (total > kept.length) console.log(`(kept the first ${kept.length} for the dump)`);
+
+  if (total === 0) {
+    console.log(
+      "\nNothing arrived. That is not automatically a failure — an idle console can be quiet.\n" +
+        "Confirm the socket opened above; if it never printed \"connected\", the endpoint or key is\n" +
+        "the problem. If it did connect, trigger something (walk past a camera) and watch again.",
+    );
+  }
+
+  if (typeCounts.size > 0) {
+    console.log("\nFrame types seen");
+    const rows = [...typeCounts.entries()].sort((a, b) => b[1] - a[1]);
+    const w = Math.max(4, ...rows.map(([t]) => t.length));
+    console.log(`  ${"TYPE".padEnd(w)}  COUNT`);
+    for (const [t, n] of rows) console.log(`  ${t.padEnd(w)}  ${n}`);
+  }
+
+  if (presses.size > 0) {
+    console.log("\nButton-like events — this is the mapping the console would key off");
+    const rows = [...presses.values()].map((s) => {
+      const gaps = s.atMs.slice(1).map((t, i) => t - s.atMs[i]);
+      return {
+        device: s.device,
+        path: s.path,
+        value: s.value,
+        events: String(s.atMs.length),
+        minGap: gaps.length > 0 ? fmtGap(Math.min(...gaps)) : "-",
+        maxGap: gaps.length > 0 ? fmtGap(Math.max(...gaps)) : "-",
+        tight: gaps.some((g) => g < DEDUPE_SUSPICION_MS),
+      };
+    });
+    const cols = ["device", "path", "value", "events", "minGap", "maxGap"] as const;
+    const w = (c: (typeof cols)[number]) => Math.max(c.length, ...rows.map((r) => r[c].length));
+    console.log(`  ${cols.map((c) => c.toUpperCase().padEnd(w(c))).join("  ")}`);
+    for (const r of rows) console.log(`  ${cols.map((c) => r[c].padEnd(w(c))).join("  ")}`);
+
+    if (rows.some((r) => r.tight)) {
+      console.log(
+        `\n  ! Some buttons produced repeat frames inside ${DEDUPE_SUSPICION_MS}ms. If you only pressed\n` +
+          "    once, a single press emits more than one event and the console MUST dedupe before\n" +
+          "    acting — otherwise one press starts, stops, and restarts an alert.",
+      );
+    }
+    console.log(
+      "\n  Match these against the order you pressed them to learn the button identifiers.\n" +
+        "  The path column is the field the console should read; the value is what to map to a cue.",
+    );
+  } else if (total > 0) {
+    console.log(
+      "\nNo button-like fields in any frame. With a fob paired, that means the presses are not\n" +
+        "reaching this stream — check --devices, and inspect the dump for a field this probe\n" +
+        "does not recognise before concluding the fob is unusable.",
+    );
+  }
+
+  const dumpPath = saveJson("events", { host: config.host, path, elapsedSeconds: round(elapsed), total, frames: kept });
+  console.log(`\nFull frames written to ${dumpPath}`);
+  record({ cmd: "watch-events", path, elapsedSeconds: round(elapsed), total, buttonSeries: presses.size, types: Object.fromEntries(typeCounts) });
+}
+
 // ------------------------------------------------------------ version-check
 
 async function cmdVersionCheck(): Promise<void> {
@@ -336,6 +526,9 @@ try {
       break;
     case "tts":
       await cmdTts(rest);
+      break;
+    case "watch-events":
+      await cmdWatchEvents(rest);
       break;
     case "version-check":
       await cmdVersionCheck();

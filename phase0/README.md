@@ -5,8 +5,8 @@ Small CLI that validates every hardware/API assumption the PA system depends on,
 UniFi Dream Machine Pro through two integration paths:
 
 - **Official Protect Integration API** (`/proxy/protect/integration/v1/...`, `X-API-KEY`) —
-  speaker inventory, test sound, Alarm Manager webhook triggering. This is the path
-  scheduled bells will use in production.
+  speaker inventory, test sound, Alarm Manager webhook triggering, and the inbound
+  event stream. This is the path scheduled bells will use in production.
 - **Private Protect API** (`/api/auth/login` + `/proxy/protect/api/...`) — full device
   detail via bootstrap, and dynamic text-to-speech via the Test-Alarm dry run
   (`PLAY_TEXT_ON_SPEAKER`). Technique from
@@ -110,6 +110,48 @@ depends on.
 Reboot the console; after Protect is back, re-run `discover`, `webhook`, and `tts`
 without restarting anything else. The clients re-login/re-auth automatically —
 confirm that holds.
+
+### 7. Inbound events — can a physical button drive the console?
+
+Not part of the original acceptance gate. This answers a later question: staff want
+to trigger an emergency announcement from a physical button, and the candidate
+hardware is a UniFi SuperLink key fob (USL-FOB, needs a USL-Gateway). A fob press
+is only useful if it reaches software, so watch the stream the console would listen on:
+
+```
+npm run phase0 -- watch-events
+```
+
+Subscribes to `wss://<host>/proxy/protect/integration/v1/subscribe/events` with the
+same API key the REST calls use, prints every frame, and writes them all to
+`results/`. `--devices` watches `/v1/subscribe/devices` (add/update/remove) instead;
+`--seconds N` self-terminates; `--raw` dumps full JSON per frame.
+
+**Run it before buying anything.** With no SuperLink hardware at all it still proves
+the endpoint, the key, and the envelope — which is most of the risk. Verified working
+on the dev NVR: both subscriptions connect, and camera activity produces frames shaped
+
+```json
+{ "type": "update", "item": { "id": "...", "modelKey": "event", "type": "smartDetectZone", "device": "<device id>" } }
+```
+
+so the console would read the action from the outer `type` and the payload from `item`.
+
+With a fob in hand, press each button once, ~3s apart, in a written-down order. Frames
+carrying a button-like field are marked `<< BUTTON`, and the closing summary tables
+each `(device, field, value)` triple with how many events it produced and the gaps
+between them. That table is the answer to three design questions at once:
+
+- **which identifier** each button sends (what the console maps to a sound cue),
+- **whether one press emits one event** — the summary warns when repeats arrive
+  inside 1.5s, because if it does, the console must dedupe or a single press will
+  start, stop, and restart an alert,
+- **whether a single click fires at all**, or whether the fob requires a hold —
+  which decides how much guarding the console has to add to match the 1.5s
+  hold-to-arm the web UI already requires.
+
+Note that Protect re-sends `update` frames for the same event id, so dedupe by
+`item.id` is needed regardless of what the fob turns out to do.
 
 ### After any Protect or firmware update
 
