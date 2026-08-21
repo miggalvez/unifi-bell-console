@@ -224,6 +224,7 @@ function EditUserDialog({ user, trigger }: { user: UserItem; trigger: ReactEleme
   const [canEmergency, setCanEmergency] = useState(user.canEmergency);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const errorId = `user-name-error-${user.id}`;
 
   // Reopening shows the row's current values, not whatever was typed and
   // abandoned last time.
@@ -237,18 +238,35 @@ function EditUserDialog({ user, trigger }: { user: UserItem; trigger: ReactEleme
   };
 
   const save = () => {
+    if (pending) return;
+
+    // Only what actually changed. An audit row that lists every field on every
+    // save cannot be read afterwards as a record of who was granted emergency
+    // permission and when — which is the reason the field is logged at all.
+    const changes: Parameters<typeof updateUser>[1] = {};
     const name = displayName.trim();
-    if (!name) {
-      setError("Name cannot be empty.");
+    if (name !== user.displayName) changes.displayName = name;
+    if (canEmergency !== user.canEmergency) changes.canEmergency = canEmergency;
+    if (Object.keys(changes).length === 0) {
+      setOpen(false);
       return;
     }
+
+    // The name rule is validated server-side only, so there is one message for
+    // it rather than two that can drift apart.
     startTransition(async () => {
-      const r = await updateUser(user.id, { displayName: name, canEmergency });
-      if (r.ok) {
-        toast.success("Saved");
-        setOpen(false);
-      } else {
-        setError(r.error ?? "Failed");
+      try {
+        const r = await updateUser(user.id, changes);
+        if (r.ok) {
+          toast.success("Saved");
+          setOpen(false);
+        } else {
+          setError(r.error ?? "Failed");
+        }
+      } catch {
+        // updateUser throws, not just returns, when the session is no longer an
+        // administrator. Swallowing that leaves the dialog looking idle.
+        setError("Could not save. Check that you are still signed in as an administrator.");
       }
     });
   };
@@ -258,7 +276,7 @@ function EditUserDialog({ user, trigger }: { user: UserItem; trigger: ReactEleme
       <DialogTrigger render={trigger} />
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit {user.username}</DialogTitle>
+          <DialogTitle>Edit {user.displayName}</DialogTitle>
           <DialogDescription>
             The name is what staff see across the console. The username used to sign in cannot be
             changed here.
@@ -278,6 +296,9 @@ function EditUserDialog({ user, trigger }: { user: UserItem; trigger: ReactEleme
               value={displayName}
               maxLength={64}
               onChange={(e) => setDisplayName(e.target.value)}
+              disabled={pending}
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? errorId : undefined}
               autoFocus
             />
           </div>
@@ -289,7 +310,11 @@ function EditUserDialog({ user, trigger }: { user: UserItem; trigger: ReactEleme
             onCheckedChange={setCanEmergency}
             disabled={pending}
           />
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          {error ? (
+            <p id={errorId} role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>
               Cancel
