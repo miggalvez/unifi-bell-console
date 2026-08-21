@@ -21,6 +21,21 @@ export interface SettingsResult {
   error?: string;
 }
 
+const MAX_DISPLAY_NAME = 64;
+
+/**
+ * Shared by create and edit so the bound cannot hold on one path and not the
+ * other — a name too long to save is also a name that should never be created.
+ */
+function normalizeDisplayName(value: unknown): { ok: true; value: string } | { ok: false; error: string } {
+  if (typeof value !== "string") return { ok: false, error: "Name must be text." };
+  const displayName = value.trim();
+  if (displayName.length < 1 || displayName.length > MAX_DISPLAY_NAME) {
+    return { ok: false, error: `Name must be 1–${MAX_DISPLAY_NAME} characters.` };
+  }
+  return { ok: true, value: displayName };
+}
+
 export async function createUser(_prev: SettingsResult, formData: FormData): Promise<SettingsResult> {
   const admin = await requireAdmin();
   const username = String(formData.get("username") ?? "").trim();
@@ -32,6 +47,8 @@ export async function createUser(_prev: SettingsResult, formData: FormData): Pro
   if (!/^[a-zA-Z0-9._-]{3,32}$/.test(username)) {
     return { ok: false, error: "Username must be 3–32 characters (letters, digits, . _ -)." };
   }
+  const name = normalizeDisplayName(displayName);
+  if (!name.ok) return { ok: false, error: name.error };
   if (password.length < 8) return { ok: false, error: "Password must be at least 8 characters." };
 
   const now = Date.now();
@@ -40,7 +57,7 @@ export async function createUser(_prev: SettingsResult, formData: FormData): Pro
       .insert(schema.users)
       .values({
         username,
-        displayName,
+        displayName: name.value,
         passwordHash: await hashPassword(password),
         role,
         canEmergency,
@@ -68,23 +85,39 @@ export async function updateUser(
   },
 ): Promise<SettingsResult> {
   const admin = await requireAdmin();
-  if (userId === admin.id && (patch.isDisabled || patch.role === "STAFF")) {
+
+  // Named fields, never a spread of the caller's object. A server action is a
+  // public POST endpoint and the parameter type above is erased at runtime, so
+  // spreading would let any column of `users` through — password_hash and
+  // username included.
+  const changes: Partial<typeof schema.users.$inferInsert> = {};
+
+  if (patch.displayName !== undefined) {
+    const name = normalizeDisplayName(patch.displayName);
+    if (!name.ok) return { ok: false, error: name.error };
+    changes.displayName = name.value;
+  }
+  if (patch.role !== undefined) {
+    if (patch.role !== "ADMIN" && patch.role !== "STAFF") {
+      return { ok: false, error: "Unknown role." };
+    }
+    changes.role = patch.role;
+  }
+  // Checked rather than coerced: a truthy string quietly becoming "may play
+  // emergency announcements" is not a mistake worth being forgiving about.
+  for (const flag of ["canEmergency", "isDisabled"] as const) {
+    if (patch[flag] === undefined) continue;
+    if (typeof patch[flag] !== "boolean") return { ok: false, error: `${flag} must be true or false.` };
+    changes[flag] = patch[flag];
+  }
+
+  if (userId === admin.id && (changes.isDisabled || changes.role === "STAFF")) {
     return { ok: false, error: "You cannot demote or disable your own account." };
   }
-
-  // Normalize here rather than trusting the caller: this action is a public
-  // entry point, not just the settings dialog's private helper.
-  const changes = { ...patch };
-  if (changes.displayName !== undefined) {
-    const displayName = changes.displayName.trim();
-    if (displayName.length < 1 || displayName.length > 64) {
-      return { ok: false, error: "Name must be 1–64 characters." };
-    }
-    changes.displayName = displayName;
-  }
+  if (Object.keys(changes).length === 0) return { ok: true };
 
   db.update(schema.users).set({ ...changes, updatedAt: Date.now() }).where(eq(schema.users.id, userId)).run();
-  if (patch.isDisabled) {
+  if (changes.isDisabled) {
     db.delete(schema.sessions).where(eq(schema.sessions.userId, userId)).run();
   }
   writeAudit({ userId: admin.id, action: "user.update", targetType: "user", targetId: userId, detail: changes });
