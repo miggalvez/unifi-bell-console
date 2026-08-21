@@ -10,9 +10,13 @@ export default async function PhonePage() {
   const user = await requireUser("/m");
   const { presets, emergencies, zones } = loadAnnouncementCues(user);
 
-  // Order is for a thumb, not a mouse: the one-tap tiles first, the emergency
-  // tiles still on the first screen, and the keyboard-driven composer last so
-  // typing never pushes the red tiles around.
+  // Order is for a thumb: the everyday one-tap tiles first, then the
+  // hold-to-arm emergency tiles, then the keyboard-driven composer last so
+  // typing never shifts the tiles above it. On a phone the emergency tiles
+  // sit below the preset list rather than on the first screen — deliberately,
+  // so routine use does not scroll past red "lockdown" tiles every time. The
+  // time-critical control is Stop, which is the always-visible red bar in the
+  // layout, not anything down here.
   return (
     <>
       <InstallHint />

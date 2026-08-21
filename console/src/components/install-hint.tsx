@@ -15,18 +15,27 @@ function subscribe() {
 
 /** Client-only: "hidden" when already installed, or dismissed on this phone. */
 function getSnapshot(): Platform {
-  const nav = navigator as Navigator & { standalone?: boolean };
-  const installed =
-    window.matchMedia("(display-mode: standalone)").matches || nav.standalone === true;
-  if (installed || localStorage.getItem(DISMISSED_KEY)) return "hidden";
-  const ua = navigator.userAgent;
-  // iPadOS reports itself as a Mac; the touch-point check tells them apart.
-  // Android is ruled out first so a desktop browser emulating a phone on a
-  // Mac does not read as an iPad.
-  const ios =
-    !/Android/.test(ua) &&
-    (/iPhone|iPad|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
-  return ios ? "ios" : "other";
+  try {
+    const nav = navigator as Navigator & { standalone?: boolean };
+    const installed =
+      window.matchMedia("(display-mode: standalone)").matches || nav.standalone === true;
+    if (installed || localStorage.getItem(DISMISSED_KEY)) return "hidden";
+    const ua = navigator.userAgent;
+    // iPadOS reports itself as a Mac; the touch-point check tells them apart.
+    // Android is ruled out first so a desktop browser emulating a phone on a
+    // Mac does not read as an iPad.
+    const ios =
+      !/Android/.test(ua) &&
+      (/iPhone|iPad|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+    return ios ? "ios" : "other";
+  } catch {
+    // matchMedia and localStorage both throw when the browser blocks site
+    // data (locked-down Safari, some MDM profiles, embedded webviews). This
+    // runs during render via useSyncExternalStore, and there is no error
+    // boundary above /m — a cosmetic install hint must never take the page
+    // down, so treat any failure as "already handled, show nothing".
+    return "hidden";
+  }
 }
 
 function getServerSnapshot(): Platform {
@@ -63,7 +72,12 @@ export function InstallHint() {
         size="icon-sm"
         aria-label="Dismiss"
         onClick={() => {
-          localStorage.setItem(DISMISSED_KEY, "1");
+          try {
+            localStorage.setItem(DISMISSED_KEY, "1");
+          } catch {
+            // Storage blocked — the hint reappears next load, which is a far
+            // smaller problem than throwing out of a click handler.
+          }
           setDismissed(true);
         }}
       >

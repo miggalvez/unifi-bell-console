@@ -25,7 +25,12 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
       const keys = await caches.keys();
-      await Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)));
+      // Only our own caches. The Cache store is origin-wide, not scoped to
+      // this worker, so deleting every non-matching key would clobber a cache
+      // some other feature on the origin might own.
+      await Promise.all(
+        keys.filter((key) => key.startsWith("bells-") && key !== CACHE).map((key) => caches.delete(key)),
+      );
       await self.clients.claim();
     })(),
   );
