@@ -88,14 +88,15 @@ function EmergencyTile({ cue }: { cue: CueRow }) {
     return (
       <div className="space-y-2 rounded-lg border border-destructive bg-card p-3">
         <div className="truncate text-sm font-medium">{cue.name}</div>
+        {/* 44px tall: on a phone these are pressed with a thumb, in a hurry. */}
         <div className="flex flex-wrap gap-2">
-          <Button variant="destructive" size="sm" onClick={repeat}>
+          <Button variant="destructive" size="sm" className="h-11 flex-1" onClick={repeat}>
             <Repeat className="size-3.5" /> Repeat until stopped
           </Button>
-          <Button variant="outline" size="sm" onClick={playOnce}>
+          <Button variant="outline" size="sm" className="h-11 flex-1" onClick={playOnce}>
             Play once
           </Button>
-          <Button variant="ghost" size="sm" onClick={disarm}>
+          <Button variant="ghost" size="sm" className="h-11" onClick={disarm}>
             Cancel
           </Button>
         </div>
@@ -110,8 +111,14 @@ function EmergencyTile({ cue }: { cue: CueRow }) {
       onPointerDown={beginHold}
       onPointerUp={stopHold}
       onPointerLeave={stopHold}
+      // A scroll, a system gesture or an incoming call cancels the pointer
+      // without ever releasing it; the hold must not keep counting.
+      onPointerCancel={stopHold}
       onContextMenu={(e) => e.preventDefault()}
-      className="relative select-none overflow-hidden rounded-lg border border-destructive/40 bg-card p-4 text-left disabled:opacity-60"
+      // touch-none: a finger drifting during the 1.5s hold must not turn into
+      // a scroll (which would cancel the hold). The callout rule stops iOS
+      // offering to copy the label on a long press.
+      className="relative touch-none select-none overflow-hidden rounded-lg border border-destructive/40 bg-card p-4 text-left [-webkit-touch-callout:none] disabled:opacity-60"
     >
       <span
         className="absolute inset-y-0 left-0 bg-destructive/15 transition-none"

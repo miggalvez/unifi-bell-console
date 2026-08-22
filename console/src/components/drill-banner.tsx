@@ -41,7 +41,7 @@ export function DrillBanner() {
 
   return (
     <div className="sticky top-0 z-30 border-b-2 border-warning bg-warning/15">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-6 py-3">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-6">
         <GraduationCap className="size-4 shrink-0 text-warning-strong" />
         <span className="font-semibold text-foreground">
           Drill in progress — this is not a real emergency: {sequenceName}
@@ -54,7 +54,7 @@ export function DrillBanner() {
         </span>
         <Button
           size="sm"
-          className="ml-auto gap-1.5 bg-warning-strong text-warning-strong-foreground shadow-xs hover:bg-warning-strong/90"
+          className="ml-auto h-10 gap-1.5 bg-warning-strong text-warning-strong-foreground shadow-xs hover:bg-warning-strong/90 sm:h-8"
           disabled={pending}
           onClick={() =>
             startTransition(async () => {

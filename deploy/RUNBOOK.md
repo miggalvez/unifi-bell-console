@@ -26,9 +26,9 @@ it should work for any school, church, or office with AI Speakers.
   page**, plus a dedicated local console admin account for the TTS path. See
   [phase0/README.md](../phase0/README.md) for how to get each.
 - A USB stick for the installer.
-- **If staff will record announcements in their browser**: a hostname for the
-  console and a way to serve it over HTTPS. Decide this before you install —
-  see Part 6.
+- **If staff will record announcements in their browser, or install the phone
+  app**: a hostname for the console and a way to serve it over HTTPS. Decide
+  this before you install — see Part 6.
 
 ## Part 1 — BIOS
 
@@ -60,7 +60,7 @@ second period".
    clicking Apply, which is an easy way to do this whole pass twice.
 
 Verify at the end of the install, not now: see the pull-the-plug test in
-Part 7.
+Part 8.
 
 ## Part 2 — Proxmox host (optional)
 
@@ -96,7 +96,7 @@ whole reason; the app itself gains nothing from virtualization.
    - Network: bridged on `vmbr0`
    - **QEMU Guest Agent: yes**, and install `qemu-guest-agent` inside the
      guest afterwards. This is what gives you clean shutdowns and
-     filesystem-consistent snapshots, which is the whole point of Part 8.
+     filesystem-consistent snapshots, which is the whole point of Part 9.
    - Leave the CPU type at its default rather than `host`. The performance
      difference is irrelevant for this workload, and the default restores
      cleanly onto replacement hardware that may not be the same brand.
@@ -264,18 +264,22 @@ systemctl status bell-worker bell-web
 Both should be `active (running)`. If `bell-web` restarts in a loop, the most
 likely cause is a missing build — run Part 4's build step.
 
-## Part 6 — HTTPS, if staff will record announcements
+## Part 6 — HTTPS, for browser recording and the phone app
 
-**Skip this part** if staff will only use typed (TTS) announcements and
-uploaded audio files. Those work fine over plain HTTP, as do bells, emergency
-alerts, and drills. Everything in the console works over HTTP except one
-thing.
+**Skip this part** if staff will only use the console from a desk, with typed
+(TTS) announcements and uploaded audio files. Those work fine over plain HTTP,
+as do bells, emergency alerts, and drills. Everything in the console works
+over HTTP except two things.
 
-That one thing: **recording an announcement with the browser's microphone.**
+The first: **recording an announcement with the browser's microphone.**
 The microphone belongs to the staff member's own computer, and browsers refuse
 microphone access on insecure origins. `localhost` is exempt, but the console
 is a headless machine in a closet — nobody is browsing from it. So on
 `http://<ip>:3000` the recorder is disabled on every device that matters.
+
+The second: **installing the phone app** (Part 7). Browsers only install a
+web app from a secure origin, so on plain HTTP the "Add to Home Screen" route
+produces a bookmark, not an app.
 
 The console handles this honestly rather than failing at the moment someone
 presses record: it checks `window.isSecureContext` on load and shows the
@@ -330,7 +334,39 @@ Restart the services and confirm the console is reachable at the HTTPS
 hostname before moving on. Record the hostname, the certificate method, and
 the renewal date in your site sheet.
 
-## Part 7 — Verify
+## Part 7 — Staff phones: install the app
+
+Only after Part 6 — the app will not install from a plain `http://` address.
+
+The console has a phone view at `https://<hostname>/m`: saved announcements,
+emergency alerts and the Stop bar, nothing else. Staff add it to their home
+screen once and it launches like an app.
+
+**iPhone / iPad.** Open the address in Safari — iOS only installs from Safari,
+not Chrome — tap Share, then *Add to Home Screen*, then *Add*. The first
+launch asks for a password even if Safari was already signed in: the installed
+app keeps its own sign-in, separate from the browser. After that it stays
+signed in for as long as it is used.
+
+**Android.** Open the address in Chrome, tap the ⋮ menu, then *Add to Home
+screen* or *Install app*. Chrome shares its sign-in with the app.
+
+**Check on one phone of each kind:**
+
+- Launching from the icon opens full-screen, with no browser bar.
+- Turn Wi-Fi and mobile data off and launch again: a "can't reach the bell
+  console" page, not a browser error. Turn them back on and tap *Try again*.
+- Press and hold an emergency tile for a second and a half without scrolling;
+  it arms. Tap *Cancel*.
+- Off-site, the app only works over Tailscale (or whatever remote access you
+  set up); on the school Wi-Fi it works directly.
+
+Who should have it: the people with the emergency permission in Settings →
+Staff accounts, plus anyone who makes announcements from a classroom. The app
+shows the emergency tiles only to accounts with that permission. Record the
+phones in the site sheet.
+
+## Part 8 — Verify
 
 Do not skip this part. An install that has not rung a bell is not an install.
 
@@ -381,7 +417,7 @@ shutdown. Restore power and confirm it boots on its own, both services start,
 and bells resume. This is the only real test of Part 1, and the scenario that
 actually happens.
 
-## Part 8 — Snapshot and backups
+## Part 9 — Snapshot and backups
 
 Once bells are ringing and the reboot tests pass, take a Proxmox snapshot and
 label it clearly — `known-good-<date>`. That is your rollback point.
@@ -501,7 +537,7 @@ it. For a bad build the right rollback is the previous commit, which leaves the
 data alone. That is what `--rollback` does. Save snapshot rollback for "the box
 is broken", never for "the new build has a bug".
 
-Afterwards, verify — re-run Part 7's "a real bell rings" step. An update that
+Afterwards, verify — re-run Part 8's "a real bell rings" step. An update that
 builds cleanly can still have lost the speaker, and the script cannot check
 that for you.
 

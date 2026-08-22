@@ -1,7 +1,6 @@
 import Link from "next/link";
-import { and, asc, eq } from "drizzle-orm";
-import { db, schema } from "@/lib/db/client";
 import { requireUser } from "@/lib/auth/guards";
+import { loadAnnouncementCues } from "@/lib/announcement-cues";
 import { PageHeader } from "@/components/page-header";
 import { Composer, PresetTiles } from "./composer";
 import { EmergencyTiles } from "./emergency-tiles";
@@ -12,21 +11,7 @@ export const dynamic = "force-dynamic";
 
 export default async function AnnouncementsPage() {
   const user = await requireUser();
-  const presets = db
-    .select()
-    .from(schema.soundCues)
-    .where(and(eq(schema.soundCues.isEnabled, true), eq(schema.soundCues.isEmergency, false)))
-    .orderBy(asc(schema.soundCues.sortOrder), asc(schema.soundCues.name))
-    .all();
-  const emergencies = user.canEmergency
-    ? db
-        .select()
-        .from(schema.soundCues)
-        .where(and(eq(schema.soundCues.isEnabled, true), eq(schema.soundCues.isEmergency, true)))
-        .orderBy(asc(schema.soundCues.sortOrder), asc(schema.soundCues.name))
-        .all()
-    : [];
-  const zones = db.select({ id: schema.zones.id, name: schema.zones.name }).from(schema.zones).all();
+  const { presets, emergencies, zones } = loadAnnouncementCues(user);
   const ffmpegReady = await ffmpegAvailable();
 
   return (
