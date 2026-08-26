@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { useRef, useTransition } from "react";
 import { toast } from "sonner";
-import { Archive, ArchiveRestore, Copy, Plus, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, Copy, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { friendlyTime } from "@/lib/format";
 import { createPlan, deletePlan, duplicatePlan, setPlanArchived } from "./actions";
+import { RenamePlanDialog } from "./rename-plan-dialog";
 
 export interface PlanListItem {
   id: number;
@@ -124,7 +125,16 @@ function PlanCard({ plan, isAdmin }: { plan: PlanListItem; isAdmin: boolean }) {
         </div>
       </div>
       {isAdmin ? (
-        <div className="mt-3 flex gap-1.5">
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          <RenamePlanDialog
+            planId={plan.id}
+            name={plan.name}
+            trigger={
+              <Button variant="ghost" size="sm" disabled={pending}>
+                <Pencil className="size-3.5" /> Rename
+              </Button>
+            }
+          />
           <Button
             variant="ghost"
             size="sm"
