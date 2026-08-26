@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
-import { deletePlan } from "@/app/(console)/plans/actions";
+import { deletePlan, renamePlan } from "@/app/(console)/plans/actions";
 import { localDateTimeParts } from "@/lib/scheduler/time";
 import { assignAllWeekdays, seedEvent, seedPlan, seedUser, seedWebhookCue } from "./helpers";
 
@@ -19,6 +19,7 @@ beforeEach(() => {
   db.delete(schema.bellEvents).run();
   db.delete(schema.bellPlans).run();
   db.delete(schema.soundCues).run();
+  db.delete(schema.auditLog).run();
   db.delete(schema.users).run();
   userId = seedUser();
 });
@@ -94,5 +95,49 @@ describe("deleting a bell plan", () => {
     // The audit trail records what was removed.
     const audit = db.select().from(schema.auditLog).all().at(-1)!;
     expect(audit.action).toBe("plan.delete");
+  });
+});
+
+describe("renaming a bell plan", () => {
+  it("saves the trimmed name and records who changed it", async () => {
+    const planId = seedPlan("Nomral Day");
+
+    const r = await renamePlan(planId, "  Normal Day  ");
+    expect(r.ok).toBe(true);
+
+    const plan = db.select().from(schema.bellPlans).where(eq(schema.bellPlans.id, planId)).get()!;
+    expect(plan.name).toBe("Normal Day");
+    const audit = db.select().from(schema.auditLog).all().at(-1)!;
+    expect(audit.action).toBe("plan.rename");
+    expect(JSON.parse(audit.detail!)).toMatchObject({ from: "Nomral Day", to: "Normal Day" });
+  });
+
+  it("rejects a blank name and one already taken", async () => {
+    const planId = seedPlan("Normal Day");
+    seedPlan("Half Day");
+
+    const blank = await renamePlan(planId, "   ");
+    expect(blank.ok).toBe(false);
+    expect(blank.error).toMatch(/required/i);
+
+    const taken = await renamePlan(planId, "Half Day");
+    expect(taken.ok).toBe(false);
+    expect(taken.error).toMatch(/exists/i);
+
+    expect(db.select().from(schema.bellPlans).where(eq(schema.bellPlans.id, planId)).get()!.name).toBe("Normal Day");
+  });
+
+  it("keeps the bells and the schedule pointing at the same plan", async () => {
+    const cueId = seedWebhookCue();
+    const planId = seedPlan("Old Name");
+    seedEvent(planId, "08:00", cueId, "First bell");
+    assignAllWeekdays(planId);
+
+    expect((await renamePlan(planId, "New Name")).ok).toBe(true);
+
+    expect(db.select().from(schema.bellEvents).where(eq(schema.bellEvents.bellPlanId, planId)).all()).toHaveLength(1);
+    expect(
+      db.select().from(schema.weekSchedule).where(eq(schema.weekSchedule.bellPlanId, planId)).all().length,
+    ).toBeGreaterThan(0);
   });
 });

@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import { db, schema } from "@/lib/db/client";
 import { requireUser } from "@/lib/auth/guards";
 import { PageHeader } from "@/components/page-header";
+import { RenamePlanDialog } from "../rename-plan-dialog";
 import { EventEditor } from "./event-editor";
 
 export const dynamic = "force-dynamic";
@@ -39,7 +40,9 @@ export default async function PlanDetailPage({ params }: PageProps<"/plans/[id]"
       <PageHeader
         title={plan.name}
         description={plan.description ?? "These bells ring on any day this plan is used."}
-      />
+      >
+        {user.role === "ADMIN" ? <RenamePlanDialog planId={plan.id} name={plan.name} /> : null}
+      </PageHeader>
       <EventEditor
         planId={plan.id}
         events={events.map((e) => ({

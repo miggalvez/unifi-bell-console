@@ -41,6 +41,38 @@ export async function createPlan(name: string): Promise<PlanActionResult> {
   }
 }
 
+/**
+ * The name is the plan's identity everywhere it appears — the Schedule page,
+ * today's card, the audit trail — so a rename is a plain update: queued bells
+ * carry no name snapshot and nothing needs re-materializing.
+ */
+export async function renamePlan(id: number, name: string): Promise<PlanActionResult> {
+  const user = await requireAdmin();
+  const trimmed = name.trim();
+  if (!trimmed) return { ok: false, error: "Plan name is required." };
+  const plan = db.select().from(schema.bellPlans).where(eq(schema.bellPlans.id, id)).get();
+  if (!plan) return { ok: false, error: "Plan not found." };
+  if (trimmed === plan.name) return { ok: true, planId: id };
+  try {
+    db.update(schema.bellPlans).set({ name: trimmed, updatedAt: Date.now() }).where(eq(schema.bellPlans.id, id)).run();
+  } catch (err) {
+    const msg = (err as Error).message;
+    return { ok: false, error: msg.includes("UNIQUE") ? "A plan with that name exists." : msg.slice(0, 200) };
+  }
+  writeAudit({
+    userId: user.id,
+    action: "plan.rename",
+    targetType: "plan",
+    targetId: id,
+    detail: { from: plan.name, to: trimmed },
+  });
+  revalidatePath("/plans");
+  revalidatePath(`/plans/${id}`);
+  revalidatePath("/schedule");
+  revalidatePath("/");
+  return { ok: true, planId: id };
+}
+
 export async function duplicatePlan(id: number): Promise<PlanActionResult> {
   const user = await requireAdmin();
   const plan = db.select().from(schema.bellPlans).where(eq(schema.bellPlans.id, id)).get();
