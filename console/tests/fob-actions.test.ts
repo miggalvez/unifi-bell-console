@@ -17,16 +17,16 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/lib/fobs/provision", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/fobs/provision")>()),
   reconcileFobAlarms: vi.fn(async () => ({ ran: true, supported: true, created: 0, deleted: 0, errors: 0 })),
+  attemptFobReconcile: vi.fn(async () => {}),
 }));
 
 import {
   createFobMapping,
   deleteFobMapping,
-  setFobBaseUrl,
   setFobMappingEnabled,
   updateFobMapping,
 } from "@/app/(console)/remotes/actions";
-import { resetUserPassword, updateUser } from "@/app/(console)/settings/actions";
+import { resetUserPassword, setConsoleAddress, updateUser } from "@/app/(console)/settings/actions";
 
 const MAC = "AABBCCDDEE01";
 
@@ -70,11 +70,11 @@ beforeEach(() => {
   seedFob();
 });
 
-describe("setFobBaseUrl", () => {
+describe("setConsoleAddress", () => {
   it("stores a valid LAN address and raises the reprovision flag", async () => {
     const fd = new FormData();
     fd.set("baseUrl", "http://192.168.1.50:3000/");
-    const r = await setFobBaseUrl(fd);
+    const r = await setConsoleAddress(fd);
     expect(r.ok).toBe(true);
     expect(getSetting<string | null>(FOB_BASE_URL_KEY, null)).toBe("http://192.168.1.50:3000");
     expect(getSystemState().fobReprovisionFlag).toBe(true);
@@ -83,7 +83,7 @@ describe("setFobBaseUrl", () => {
   it("refuses localhost", async () => {
     const fd = new FormData();
     fd.set("baseUrl", "http://localhost:3000");
-    const r = await setFobBaseUrl(fd);
+    const r = await setConsoleAddress(fd);
     expect(r.ok).toBe(false);
     expect(r.error).toContain("LAN");
   });

@@ -64,7 +64,7 @@ async function headless(): Promise<void> {
 
 async function live(): Promise<void> {
   const baseUrl = getSetting<string | null>(FOB_BASE_URL_KEY, null);
-  step("console address configured", !!baseUrl, baseUrl ?? "set it on the Remotes page");
+  step("console address configured", !!baseUrl, baseUrl ?? "set it in Settings");
   if (!baseUrl) return;
 
   const r = await reconcileFobAlarms(realAdapter, { force: true });

@@ -5,14 +5,12 @@ import { revalidatePath } from "next/cache";
 import { db, schema } from "@/lib/db/client";
 import { requireAdmin } from "@/lib/auth/guards";
 import { writeAudit } from "@/lib/audit";
-import { setSetting } from "@/lib/state";
 import { normMac, realAdapter } from "@/lib/protect/adapter";
 import { upsertFobsFromBootstrap } from "@/lib/fobs/sync";
 import {
-  FOB_BASE_URL_KEY,
+  attemptFobReconcile,
   reconcileFobAlarms,
   requestFobReconcile,
-  validateBaseUrl,
   type FobMappingRow,
 } from "@/lib/fobs/provision";
 
@@ -21,27 +19,9 @@ export interface RemotesResult {
   error?: string;
 }
 
-/**
- * Push the new config toward the NVR right away so the page shows Active
- * within a moment — but never make the admin wait on a slow or dead NVR. The
- * worker's flag-driven pass is the guaranteed path; this is the fast one.
- * The lease keeps the two from double-creating.
- */
 async function nudgeReconcile(): Promise<void> {
   requestFobReconcile();
-  const attempt = reconcileFobAlarms(realAdapter).catch(() => undefined);
-  await Promise.race([attempt, new Promise((r) => setTimeout(r, 4000))]);
-}
-
-export async function setFobBaseUrl(formData: FormData): Promise<RemotesResult> {
-  const admin = await requireAdmin();
-  const parsed = validateBaseUrl(String(formData.get("baseUrl") ?? ""));
-  if (!parsed.ok) return { ok: false, error: parsed.error };
-  setSetting(FOB_BASE_URL_KEY, parsed.value);
-  writeAudit({ userId: admin.id, action: "fob.settings_update", detail: { baseUrl: parsed.value } });
-  await nudgeReconcile();
-  revalidatePath("/remotes");
-  return { ok: true };
+  await attemptFobReconcile(realAdapter);
 }
 
 type MappingInput = {

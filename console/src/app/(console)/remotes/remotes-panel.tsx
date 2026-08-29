@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import useSWR, { mutate } from "swr";
 import { toast } from "sonner";
 import { BatteryFull, BatteryLow, Loader2, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
@@ -30,7 +31,6 @@ import {
   deleteFobMapping,
   reapplyFobAlarms,
   refreshFobs,
-  setFobBaseUrl,
   setFobMappingEnabled,
   updateFobMapping,
 } from "./actions";
@@ -386,7 +386,6 @@ export function RemotesPanel({
     refreshInterval: 5000,
   });
   const [dialog, setDialog] = useState<{ fobMac: string; mapping: MappingRow | null } | null>(null);
-  const [urlPending, startUrlTransition] = useTransition();
   const [toolsPending, startToolsTransition] = useTransition();
 
   const baseUrl = data?.baseUrl ?? initialBaseUrl;
@@ -402,54 +401,26 @@ export function RemotesPanel({
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Console address</CardTitle>
-          <CardDescription>
-            Where the NVR reaches this console when a button is pressed. Use this machine&apos;s
-            LAN address — plain http is fine here; every press is authenticated with its own
-            secret token.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form
-            className="flex max-w-xl items-end gap-2"
-            action={(fd) =>
-              startUrlTransition(async () => {
-                const r = await setFobBaseUrl(fd);
-                if (r.ok) toast.success("Saved — re-applying alarms");
-                else toast.error(r.error ?? "Could not save.");
-                refresh();
-              })
-            }
-          >
-            <Field label="Address" className="flex-1">
-              <Input
-                name="baseUrl"
-                defaultValue={baseUrl ?? ""}
-                key={baseUrl ?? ""}
-                placeholder="http://192.168.1.50:3000"
-                required
-              />
-            </Field>
-            <Button type="submit" disabled={urlPending}>
-              {urlPending ? <Loader2 className="size-3.5 animate-spin" /> : null}
-              Save
-            </Button>
-          </form>
-          {reconcile ? (
-            <p className="mt-3 text-xs text-muted-foreground">
-              {reconcile.lastError
-                ? `NVR problem: ${reconcile.lastError}`
-                : reconcile.pending
-                  ? "Applying changes to the NVR…"
-                  : reconcile.lastAt
-                    ? `NVR alarms checked ${timeAgo(reconcile.lastAt)}.`
-                    : "Not applied yet."}
-            </p>
-          ) : null}
-        </CardContent>
-      </Card>
+      {!isLoading && !baseUrl ? (
+        <div className="rounded-lg border border-warning/50 bg-card p-4 text-sm">
+          Before buttons can do anything, set the <span className="font-medium">console
+          address</span> in{" "}
+          <Link href="/settings" className="underline underline-offset-2">
+            Settings
+          </Link>{" "}
+          — the NVR needs it to deliver presses back here.
+        </div>
+      ) : reconcile ? (
+        <p className="text-xs text-muted-foreground">
+          {reconcile.lastError
+            ? `NVR problem: ${reconcile.lastError}`
+            : reconcile.pending
+              ? "Applying changes to the NVR…"
+              : reconcile.lastAt
+                ? `NVR alarms checked ${timeAgo(reconcile.lastAt)}.`
+                : "Not applied yet."}
+        </p>
+      ) : null}
 
       {isLoading ? (
         <p className="text-sm text-muted-foreground">Loading remotes…</p>

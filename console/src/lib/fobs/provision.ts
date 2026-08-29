@@ -106,6 +106,17 @@ export function requestFobReconcile(): void {
   updateSystemState({ fobReprovisionFlag: true });
 }
 
+/**
+ * Push config toward the NVR right away so the UI shows Active within a
+ * moment — but never make an admin wait on a slow or dead NVR. Callers set
+ * the flag first (requestFobReconcile) so the worker remains the guaranteed
+ * path; the lease keeps the two from double-creating.
+ */
+export async function attemptFobReconcile(adapter: ProtectAdapter): Promise<void> {
+  const attempt = reconcileFobAlarms(adapter).catch(() => undefined);
+  await Promise.race([attempt, new Promise((r) => setTimeout(r, 4000))]);
+}
+
 export interface ReconcileResult {
   /** False when another pass holds the lease (or the lease claim failed). */
   ran: boolean;
@@ -197,7 +208,7 @@ export async function reconcileFobAlarms(
       for (const m of enabled) {
         markMapping(m.id, {
           provisionState: "ERROR",
-          provisionError: "Set the console address on the Remotes page first.",
+          provisionError: "Set the console address in Settings first.",
         });
       }
       updateSystemState({

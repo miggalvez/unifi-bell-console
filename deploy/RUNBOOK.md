@@ -398,7 +398,7 @@ building first:
 cd /opt/bell-console/console && sudo -u bell -H npx tsx scripts/e2e-verify.ts
 ```
 
-**Keychain remotes (if the site uses them).** On the Remotes page, set the
+**Keychain remotes (if the site uses them).** In Settings, set the
 console address to `http://<host>:3000` (plain http is right here even on an
 HTTPS install — the route authenticates every press with its own token, and
 the NVR does not trust internal certificates), map one button, and press it.

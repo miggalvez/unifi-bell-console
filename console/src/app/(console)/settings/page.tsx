@@ -5,9 +5,11 @@ import { db, schema } from "@/lib/db/client";
 import { env, projectRoot } from "@/env";
 import { requireAdmin } from "@/lib/auth/guards";
 import { FOB_SERVICE_USERNAME } from "@/lib/fobs/service-user";
-import { getSettingNumber, getSystemState } from "@/lib/state";
+import { FOB_BASE_URL_KEY } from "@/lib/fobs/provision";
+import { getSetting, getSettingNumber, getSystemState } from "@/lib/state";
 import { PageHeader } from "@/components/page-header";
 import { BackupHealthPanel, SystemPanel, UsersPanel, type BackupChannel, type UserItem } from "./settings-panels";
+import { ConsoleAddressPanel } from "./console-address-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -75,6 +77,7 @@ export default async function SettingsPage() {
           protectVersion={latestVersion?.protectVersion ?? null}
           protectHost={env.protectHost}
         />
+        <ConsoleAddressPanel baseUrl={getSetting<string | null>(FOB_BASE_URL_KEY, null)} />
         <BackupHealthPanel
           local={backupChannel(state.localBackupLastAttemptAt, state.localBackupLastSuccessAt, state.localBackupLastError)}
           offsite={backupChannel(

@@ -81,7 +81,7 @@ phone app, this section must be filled in.
 | **API key expires** | |
 | Local console admin username (TTS path) | |
 | Keychain remotes (fobs) — MAC → carrier | |
-| Remotes console address (Remotes page, `http://<guest IP>:3000`) | |
+| Console address (Settings page, `http://<guest IP>:3000`) | |
 
 Protect-local API keys default to roughly 30-day expiry. Record the date in
 the console's Settings page so it warns you before it lapses, and put the

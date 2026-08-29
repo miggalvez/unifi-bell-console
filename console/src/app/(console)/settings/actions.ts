@@ -16,6 +16,12 @@ import { resolveTargetMacs } from "@/lib/zones";
 import { materialize } from "@/lib/scheduler/materializer";
 import { createManualSnapshot } from "@/lib/backup";
 import { isFobServiceUser } from "@/lib/fobs/service-user";
+import {
+  attemptFobReconcile,
+  FOB_BASE_URL_KEY,
+  requestFobReconcile,
+  validateBaseUrl,
+} from "@/lib/fobs/provision";
 
 export interface SettingsResult {
   ok: boolean;
@@ -163,6 +169,24 @@ export async function updateSystemSettings(formData: FormData): Promise<Settings
   writeAudit({ userId: admin.id, action: "settings.update", detail: { horizonDays, missedGraceMinutes, keyExpiry } });
   materialize();
   revalidatePath("/settings");
+  return { ok: true };
+}
+
+/**
+ * The console's own network address — where devices (today: the NVR delivering
+ * keychain-remote presses) reach this machine. The reverse of PROTECT_HOST,
+ * which is where this machine reaches the NVR.
+ */
+export async function setConsoleAddress(formData: FormData): Promise<SettingsResult> {
+  const admin = await requireAdmin();
+  const parsed = validateBaseUrl(String(formData.get("baseUrl") ?? ""));
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+  setSetting(FOB_BASE_URL_KEY, parsed.value);
+  writeAudit({ userId: admin.id, action: "fob.settings_update", detail: { baseUrl: parsed.value } });
+  requestFobReconcile();
+  await attemptFobReconcile(realAdapter);
+  revalidatePath("/settings");
+  revalidatePath("/remotes");
   return { ok: true };
 }
 
