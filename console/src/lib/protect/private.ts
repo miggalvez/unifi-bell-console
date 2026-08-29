@@ -213,11 +213,24 @@ export class PrivateSession {
     return (await res.json()) as T;
   }
 
-  /** Flat list of trigger ids the Alarm Manager offers for Protect. */
+  /**
+   * Flat list of trigger ids the Alarm Manager offers for Protect. A 404 means
+   * this UniFi OS has no v2 Alarm Manager at all (older UDM/UNVR firmware) —
+   * that is "no triggers", not a transport failure, so it must not be retried.
+   */
   async alarmManifestTriggerIds(): Promise<string[]> {
-    const manifest = await this.requireJson<{
+    const { res } = await this.request("GET", "/api/v2/alarms/protect/manifest");
+    if (res.status === 404) {
+      await res.text().catch(() => "");
+      return [];
+    }
+    if (res.status < 200 || res.status >= 300) {
+      const text = (await res.text().catch(() => "")).slice(0, 300);
+      throw new Error(`GET /api/v2/alarms/protect/manifest -> HTTP ${res.status}${text ? ` ${text}` : ""}`);
+    }
+    const manifest = (await res.json()) as {
       trigger_categories?: { triggers?: { id?: string }[] }[];
-    }>("GET", "/api/v2/alarms/protect/manifest");
+    };
     const ids: string[] = [];
     for (const cat of manifest.trigger_categories ?? []) {
       for (const t of cat.triggers ?? []) {
@@ -236,7 +249,17 @@ export class PrivateSession {
   }
 
   async listAlarms(): Promise<NvrAlarmSummary[]> {
-    const alarms = await this.requireJson<Record<string, unknown>[]>("GET", "/api/v2/alarms/protect");
+    const { res } = await this.request("GET", "/api/v2/alarms/protect");
+    // Same as the manifest: no v2 Alarm Manager on this UniFi OS = no alarms.
+    if (res.status === 404) {
+      await res.text().catch(() => "");
+      return [];
+    }
+    if (res.status < 200 || res.status >= 300) {
+      const text = (await res.text().catch(() => "")).slice(0, 300);
+      throw new Error(`GET /api/v2/alarms/protect -> HTTP ${res.status}${text ? ` ${text}` : ""}`);
+    }
+    const alarms = (await res.json()) as Record<string, unknown>[];
     return alarms.map((a) => ({
       id: String(a.id ?? ""),
       title: String(a.title ?? ""),

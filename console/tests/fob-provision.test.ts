@@ -293,6 +293,27 @@ describe("PrivateSession.createAlarm body", () => {
   });
 });
 
+describe("PrivateSession on a UniFi OS without the v2 Alarm Manager", () => {
+  function sessionAnswering(status: number) {
+    const session = new PrivateSession("u", "p");
+    session.request = vi.fn(async () => ({
+      res: { status, json: async () => ({}), text: async () => "Alarm manifest not found" },
+      ms: 1,
+    }) as unknown as Awaited<ReturnType<PrivateSession["request"]>>);
+    return session;
+  }
+
+  it("treats a 404 manifest/list as 'no triggers', not a transport failure", async () => {
+    await expect(sessionAnswering(404).alarmManifestTriggerIds()).resolves.toEqual([]);
+    await expect(sessionAnswering(404).listAlarms()).resolves.toEqual([]);
+  });
+
+  it("still throws on real failures so the reconciler retries them", async () => {
+    await expect(sessionAnswering(500).alarmManifestTriggerIds()).rejects.toThrow("HTTP 500");
+    await expect(sessionAnswering(500).listAlarms()).rejects.toThrow("HTTP 500");
+  });
+});
+
 describe("trigger id constant", () => {
   it("matches the manifest id verified on the live NVR", () => {
     expect(FOB_TRIGGER_ID).toBe("protect:button.buttonPressed");
