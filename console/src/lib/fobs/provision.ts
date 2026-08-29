@@ -264,7 +264,9 @@ export async function reconcileFobAlarms(
           desiredHash: null,
           provisionState: "UNSUPPORTED",
           provisionError:
-            "This UniFi OS version has no keychain-remote button trigger — update Protect on the NVR.",
+            "This NVR does not offer keychain-remote triggers yet. UniFi enables its new " +
+            "Alarm Manager once a SuperLink gateway/fob is adopted in Protect (and Protect " +
+            "is up to date) — adopt the hardware there first; the console retries on its own.",
         });
       }
       updateSystemState({ fobLastReconcileAt: now, fobLastReconcileError: null });

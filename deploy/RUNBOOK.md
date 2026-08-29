@@ -398,8 +398,11 @@ building first:
 cd /opt/bell-console/console && sudo -u bell -H npx tsx scripts/e2e-verify.ts
 ```
 
-**Keychain remotes (if the site uses them).** In Settings, set the
-console address to `http://<host>:3000` (plain http is right here even on an
+**Keychain remotes (if the site uses them).** UniFi only switches a console
+to its new Alarm Manager — the engine remotes need — after a SuperLink
+gateway/fob is adopted in Protect, so adopt the hardware first; until then
+mappings show "unsupported" and the console re-checks on its own. Then, in
+Settings, set the console address to `http://<host>:3000` (plain http is right here even on an
 HTTPS install — the route authenticates every press with its own token, and
 the NVR does not trust internal certificates), map one button, and press it.
 The row's "Last pressed" updates within a few seconds and the mapped sound
