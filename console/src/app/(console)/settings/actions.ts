@@ -15,6 +15,7 @@ import { localDateTimeParts } from "@/lib/scheduler/time";
 import { resolveTargetMacs } from "@/lib/zones";
 import { materialize } from "@/lib/scheduler/materializer";
 import { createManualSnapshot } from "@/lib/backup";
+import { isFobServiceUser } from "@/lib/fobs/service-user";
 
 export interface SettingsResult {
   ok: boolean;
@@ -85,6 +86,10 @@ export async function updateUser(
   },
 ): Promise<SettingsResult> {
   const admin = await requireAdmin();
+  // The keychain-remote service account is hidden from the panel, but this is
+  // a public POST — refuse by id so nobody can enable emergencies on it or
+  // rename it into looking like a person.
+  if (isFobServiceUser(userId)) return { ok: false, error: "That account is managed by the system." };
 
   // Named fields, never a spread of the caller's object. A server action is a
   // public POST endpoint and the parameter type above is erased at runtime, so
@@ -127,6 +132,9 @@ export async function updateUser(
 
 export async function resetUserPassword(userId: number, password: string): Promise<SettingsResult> {
   const admin = await requireAdmin();
+  // Never give the keychain-remote service account a real password — its
+  // unparseable hash is what keeps it from ever logging in.
+  if (isFobServiceUser(userId)) return { ok: false, error: "That account is managed by the system." };
   if (password.length < 8) return { ok: false, error: "Password must be at least 8 characters." };
   db.update(schema.users)
     .set({ passwordHash: await hashPassword(password), updatedAt: Date.now() })

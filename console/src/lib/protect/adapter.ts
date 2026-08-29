@@ -3,7 +3,13 @@
  * Tests substitute a fake; production composes the official + private clients.
  */
 import * as official from "./official";
-import { getPrivateSession, type Bootstrap } from "./private";
+import {
+  getPrivateSession,
+  type AlarmCreateSpec,
+  type Bootstrap,
+  type FobButtonScope,
+  type NvrAlarmSummary,
+} from "./private";
 
 export interface ProtectAdapter {
   metaInfo(): Promise<official.Timed<{ applicationVersion: string } & Record<string, unknown>>>;
@@ -20,6 +26,12 @@ export interface ProtectAdapter {
     tone?: string,
   ): Promise<{ status: number; ms: number; detail?: string }>;
   bootstrap(): Promise<Bootstrap>;
+  // v2 Alarm Manager (keychain remotes) — see private.ts for the contract.
+  alarmManifestTriggerIds(): Promise<string[]>;
+  listButtonScopes(): Promise<FobButtonScope[]>;
+  listAlarms(): Promise<NvrAlarmSummary[]>;
+  createAlarm(spec: AlarmCreateSpec): Promise<string>;
+  deleteAlarm(id: string): Promise<void>;
 }
 
 export const realAdapter: ProtectAdapter = {
@@ -30,6 +42,11 @@ export const realAdapter: ProtectAdapter = {
   triggerWebhook: official.triggerWebhook,
   speak: (text, macs, tone) => getPrivateSession().speak(text, macs, tone),
   bootstrap: () => getPrivateSession().bootstrap(),
+  alarmManifestTriggerIds: () => getPrivateSession().alarmManifestTriggerIds(),
+  listButtonScopes: () => getPrivateSession().listButtonScopes(),
+  listAlarms: () => getPrivateSession().listAlarms(),
+  createAlarm: (spec) => getPrivateSession().createAlarm(spec),
+  deleteAlarm: (id) => getPrivateSession().deleteAlarm(id),
 };
 
 export function normMac(mac: string): string {

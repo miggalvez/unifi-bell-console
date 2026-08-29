@@ -8,6 +8,7 @@ import { getSystemState, updateSystemState } from "@/lib/state";
 import { writeAudit } from "@/lib/audit";
 import { onFallbackChange, type OfficialSpeaker } from "@/lib/protect/official";
 import { normMac, type ProtectAdapter } from "@/lib/protect/adapter";
+import { upsertFobsFromBootstrap } from "@/lib/fobs/sync";
 
 // Surface connector-fallback state on system_state so the UI can warn.
 // Compare against the DB (not module state) — web and worker are separate
@@ -160,6 +161,7 @@ export async function pollHealthOnce(adapter: ProtectAdapter): Promise<void> {
 export async function pollFirmwareOnce(adapter: ProtectAdapter): Promise<void> {
   try {
     const b = await adapter.bootstrap();
+    upsertFobsFromBootstrap(b);
     const fw: Record<string, string> = {};
     for (const s of b.speakers ?? []) {
       if (s.mac && s.firmwareVersion) {

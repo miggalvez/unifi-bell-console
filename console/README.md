@@ -28,6 +28,17 @@ Playback goes through UniFi Protect three ways:
   so a success means "transmitted", never "played". Good for announcements a
   human is listening to; wrong for unattended bells.
 
+Triggers come back the other way too: **keychain remotes** (UniFi USL fobs).
+Admins map fob buttons to console actions on the Remotes page and the console
+auto-provisions matching alarms in UniFi OS's v2 Alarm Manager
+(`POST /api/v2/alarms/protect`, local-admin session auth) — one alarm per
+button + press type, each firing a bearer-authenticated webhook back to
+`/api/fob-hooks/<mapping>`. A worker loop reconciles drift (deleted or
+hand-edited alarms are recreated within 15 minutes); presses dispatch as a
+locked-down `keychain-remote` service user, dedupe within 2s, and are audited.
+Emergency alerts can only start from a long or double press — never a single
+tap. Measured NVR→console webhook latency: 15–50ms on LAN.
+
 **Combined announcements.** A cue can be several recordings chained in order —
 an attention chime, then a spoken message — spliced by ffmpeg into ONE talkback
 stream at play time, so there is no gap between the parts (Sounds → New →
@@ -258,6 +269,9 @@ npx tsx scripts/drill-verify.ts           # drill sequence: repeats, the tag on
                                           # both sides of each sound, and a real
                                           # alert aborting it — AUDIBLE, needs
                                           # the worker
+npx tsx scripts/fob-verify.ts [--live]    # keychain-remote alarm provisioning
+                                          # round-trip; --live waits for a real
+                                          # button press (needs the web server)
 ```
 
 Deployment configs for both processes are in `../deploy/` (launchd for a Mac,

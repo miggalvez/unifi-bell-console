@@ -200,7 +200,7 @@ export async function deleteCue(id: number): Promise<CueFormResult> {
     return {
       ok: false,
       error: msg.includes("FOREIGN KEY")
-        ? "A bell plan uses this — remove it from the plan first."
+        ? "A bell plan, drill, or keychain remote uses this — remove it there first."
         : msg.slice(0, 200),
     };
   }

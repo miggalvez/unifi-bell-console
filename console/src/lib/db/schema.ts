@@ -429,6 +429,18 @@ export const systemState = sqliteTable(
      * "this is a drill" on both sides.
      */
     drillStepPhase: text("drill_step_phase", { enum: ["BEFORE", "SOUND", "AFTER"] }),
+
+    /**
+     * Keychain-remote (fob) alarm provisioning. The flag asks the worker to
+     * reconcile now; the lease keeps the worker loop and a post-edit inline
+     * attempt from double-creating alarms (creates are not idempotent).
+     */
+    fobReprovisionFlag: integer("fob_reprovision_flag", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    fobProvisionLockUntil: integer("fob_provision_lock_until"),
+    fobLastReconcileAt: integer("fob_last_reconcile_at"),
+    fobLastReconcileError: text("fob_last_reconcile_error"),
   },
   (t) => [check("system_state_singleton", sql`${t.id} = 1`)],
 );
@@ -437,6 +449,81 @@ export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(), // JSON
 });
+
+// Cache of Protect keychain remotes (USL fobs), refreshed from the private
+// bootstrap by the worker's firmware poller and the Remotes page's Refresh.
+// Upsert-only like `speakers`: rows are never pruned, so a battery-dead fob
+// shows as stale ("not seen since…") instead of vanishing.
+export const fobs = sqliteTable("fobs", {
+  mac: text("mac").primaryKey(), // normalized uppercase hex, no separators
+  protectId: text("protect_id"), // bootstrap fob id, informational
+  name: text("name"),
+  state: text("state"),
+  batteryStatus: text("battery_status"), // JSON wirelessConnectionState.batteryStatus
+  firmwareVersion: text("firmware_version"),
+  lastSeenAt: integer("last_seen_at"), // fob's own lastSeen from Protect
+  lastPolledAt: integer("last_polled_at"),
+  raw: text("raw"), // full bootstrap object, JSON, for debugging
+});
+
+/**
+ * One fob button+press slot mapped to a console action. The reconciler mirrors
+ * every enabled row onto the NVR as a v2 Alarm Manager alarm (button press →
+ * webhook back to us); the provisioning fields below are owned by it.
+ */
+export const fobMappings = sqliteTable(
+  "fob_mappings",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    // MAC, not Protect id: physical identity — same reasoning as zone_members.
+    // Deliberately no FK to `fobs`: a fob missing from one bootstrap poll must
+    // not cascade away its mappings.
+    fobMac: text("fob_mac").notNull(),
+    button: text("button", {
+      enum: ["arm", "night", "disarm", "panic", "left", "right"],
+    }).notNull(),
+    pressType: text("press_type", { enum: ["press", "longPress", "doublePress"] }).notNull(),
+    action: text("action", { enum: ["START_ALERT", "TRIGGER_CUE", "STOP_ALERT"] }).notNull(),
+    /**
+     * restrict, not set null: a fob button quietly going dead because someone
+     * deleted a sound is worse than a clear error at deletion time.
+     */
+    cueId: integer("cue_id").references(() => soundCues.id, { onDelete: "restrict" }),
+    /** START_ALERT only; clamped by minimumRepeatSeconds at press time. */
+    repeatSeconds: integer("repeat_seconds"),
+    isEnabled: integer("is_enabled", { mode: "boolean" }).notNull().default(true),
+
+    // --- provisioning state, owned by the reconciler ---
+    nvrAlarmId: text("nvr_alarm_id"),
+    /**
+     * sha256 hex of the bearer token minted for this mapping's NVR alarm.
+     * The plaintext lives only inside the alarm body on the NVR, never here —
+     * same shape as sessions.id.
+     */
+    tokenHash: text("token_hash"),
+    /** Hash of the desired alarm config at creation; mismatch = recreate. */
+    desiredHash: text("desired_hash"),
+    provisionState: text("provision_state", {
+      enum: ["PENDING", "OK", "ERROR", "UNSUPPORTED"],
+    })
+      .notNull()
+      .default("PENDING"),
+    provisionError: text("provision_error"),
+    /** Doubles as the press-dedupe claim column (atomic conditional update). */
+    lastTriggeredAt: integer("last_triggered_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("fob_mapping_slot_uniq").on(t.fobMac, t.button, t.pressType),
+    // Unqualified column names — see the note on sound_cues.
+    check(
+      "fob_mapping_action_fields",
+      sql`(action = 'STOP_ALERT' AND cue_id IS NULL)
+        OR (action IN ('START_ALERT','TRIGGER_CUE') AND cue_id IS NOT NULL)`,
+    ),
+  ],
+);
 
 // Append-only; a new row is inserted only when a version changes,
 // which also sets systemState.ttsRevalidateFlag

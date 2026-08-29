@@ -27,10 +27,48 @@ export interface PrivateSpeaker {
   [key: string]: unknown;
 }
 
+export interface PrivateFob {
+  id: string;
+  mac: string;
+  name?: string;
+  state?: string;
+  firmwareVersion?: string;
+  lastSeen?: number;
+  wirelessConnectionState?: {
+    batteryStatus?: { percentage?: number; isLow?: boolean };
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
 export interface Bootstrap {
   speakers?: PrivateSpeaker[];
+  fobs?: PrivateFob[];
   nvr?: { version?: string; firmwareVersion?: string; marketName?: string; [key: string]: unknown };
   [key: string]: unknown;
+}
+
+/** One entry from the Alarm Manager's live scope catalogue (all-buttons). */
+export interface FobButtonScope {
+  value: string; // "<MAC>" or "<MAC>:button=<key>"
+  label: string;
+  group?: string;
+  metadata?: unknown;
+}
+
+/** A v2 alarm as listed — id/title plus the raw read model for drift checks. */
+export interface NvrAlarmSummary {
+  id: string;
+  title: string;
+  raw: Record<string, unknown>;
+}
+
+export interface AlarmCreateSpec {
+  title: string;
+  pressType: "press" | "longPress" | "doublePress";
+  /** "<FOBMAC>:button=<key>" (or bare MAC for any-button). */
+  scopeValue: string;
+  webhook: { url: string; token: string };
 }
 
 export class PrivateSession {
@@ -157,6 +195,109 @@ export class PrivateSession {
     // was the problem.
     const detail = res.status === 200 ? "" : (await res.text().catch(() => "")).slice(0, 300);
     return { status: res.status, ms, detail };
+  }
+
+  // ---------------------------------------------------------------------------
+  // UniFi OS v2 Alarm Manager — the engine fob button presses actually flow
+  // through (nvr.featureFlags.useExternalAlarmManager). Contract verified live
+  // against Protect 7.2.105 on 2026-08-28; like everything else in this file
+  // it can change on any UniFi OS update.
+  // ---------------------------------------------------------------------------
+
+  private async requireJson<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const { res } = await this.request(method, path, body);
+    if (res.status < 200 || res.status >= 300) {
+      const text = (await res.text().catch(() => "")).slice(0, 300);
+      throw new Error(`${method} ${path} -> HTTP ${res.status}${text ? ` ${text}` : ""}`);
+    }
+    return (await res.json()) as T;
+  }
+
+  /** Flat list of trigger ids the Alarm Manager offers for Protect. */
+  async alarmManifestTriggerIds(): Promise<string[]> {
+    const manifest = await this.requireJson<{
+      trigger_categories?: { triggers?: { id?: string }[] }[];
+    }>("GET", "/api/v2/alarms/protect/manifest");
+    const ids: string[] = [];
+    for (const cat of manifest.trigger_categories ?? []) {
+      for (const t of cat.triggers ?? []) {
+        if (typeof t.id === "string") ids.push(t.id);
+      }
+    }
+    return ids;
+  }
+
+  /** Live per-button scope tokens ("<MAC>", "<MAC>:button=panic", …). */
+  async listButtonScopes(): Promise<FobButtonScope[]> {
+    return this.requireJson<FobButtonScope[]>(
+      "GET",
+      "/proxy/protect/api/automationManager/external/data/scopes/all-buttons",
+    );
+  }
+
+  async listAlarms(): Promise<NvrAlarmSummary[]> {
+    const alarms = await this.requireJson<Record<string, unknown>[]>("GET", "/api/v2/alarms/protect");
+    return alarms.map((a) => ({
+      id: String(a.id ?? ""),
+      title: String(a.title ?? ""),
+      raw: a,
+    }));
+  }
+
+  /**
+   * Create one "fob button press -> webhook back to the console" alarm.
+   * The body is strict Rust serde on the NVR side — field names and the
+   * nested-array shapes are exact, so keep this the only place that knows them.
+   */
+  async createAlarm(spec: AlarmCreateSpec): Promise<string> {
+    const body = {
+      title: spec.title,
+      triggers_data: [
+        [
+          {
+            id: "protect:button.buttonPressed",
+            precondition_config: null,
+            data: { pressType: spec.pressType },
+          },
+        ],
+      ],
+      actions_data: [
+        [
+          {
+            id: "protect:webhook",
+            target_ids: [],
+            data: {
+              url: spec.webhook.url,
+              method: "POST",
+              auth: { variant: "bearer", token: spec.webhook.token },
+            },
+          },
+        ],
+      ],
+      scope: { mode: "include", data: { scope_all_buttons: [spec.scopeValue] } },
+      suppression: null,
+      restriction: null,
+    };
+    const created = await this.requireJson<{ id?: string }>("POST", "/api/v2/alarms/protect", body);
+    if (created.id) return created.id;
+    // Fallback: titles embed the mapping id, so they are unique per alarm.
+    const match = (await this.listAlarms()).find((a) => a.title === spec.title);
+    if (!match) throw new Error("Alarm created but no id returned and title not found in list");
+    return match.id;
+  }
+
+  /** Delete by id; a 404 means it is already gone, which is the goal state. */
+  async deleteAlarm(id: string): Promise<void> {
+    const { res } = await this.request("DELETE", `/api/v2/alarms/protect/${id}`);
+    if (res.status === 404) {
+      await res.text().catch(() => "");
+      return;
+    }
+    if (res.status < 200 || res.status >= 300) {
+      const text = (await res.text().catch(() => "")).slice(0, 300);
+      throw new Error(`DELETE alarm ${id} -> HTTP ${res.status}${text ? ` ${text}` : ""}`);
+    }
+    await res.text().catch(() => "");
   }
 }
 

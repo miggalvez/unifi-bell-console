@@ -21,23 +21,13 @@ import {
   MIN_REPEAT_SECONDS,
 } from "@/lib/alerts";
 import type { ProtectAdapter } from "@/lib/protect/adapter";
-import { seedUser, seedWebhookCue, seedSpeaker, insertClaimedRun } from "./helpers";
+import { fakeProtectAdapter, seedUser, seedWebhookCue, seedSpeaker, insertClaimedRun } from "./helpers";
 import { executeClaimedRun } from "@/lib/scheduler/executor";
 import { claimNextDueRun } from "@/lib/scheduler/claim";
 import { tryClaimSpeaker } from "@/lib/speaker-lock";
 import { blockedByActiveAlert } from "@/lib/alert-guard";
 
-function fakeAdapter(): ProtectAdapter {
-  return {
-    metaInfo: vi.fn(),
-    listSpeakers: vi.fn(),
-    patchSpeaker: vi.fn(),
-    testSound: vi.fn(),
-    triggerWebhook: vi.fn().mockResolvedValue({ status: 204, ms: 10 }),
-    speak: vi.fn().mockResolvedValue({ status: 200, ms: 50 }),
-    bootstrap: vi.fn(),
-  } as unknown as ProtectAdapter;
-}
+const fakeAdapter = (): ProtectAdapter => fakeProtectAdapter();
 
 let userId: number;
 let cueId: number;

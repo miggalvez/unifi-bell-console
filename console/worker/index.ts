@@ -13,13 +13,19 @@ import { executeClaimedRun } from "@/lib/scheduler/executor";
 import { materialize } from "@/lib/scheduler/materializer";
 import { tickAlert } from "@/lib/alerts";
 import { tickDrill } from "@/lib/drills";
-import { updateSystemState } from "@/lib/state";
+import { getSystemState, updateSystemState } from "@/lib/state";
+import { reconcileFobAlarms } from "@/lib/fobs/provision";
 
 const CLAIM_INTERVAL_MS = 1_000;
 const HEALTH_INTERVAL_MS = 30_000;
 const FIRMWARE_INTERVAL_MS = 60 * 60_000;
 const MATERIALIZE_INTERVAL_MS = 6 * 60 * 60_000;
 const HEARTBEAT_INTERVAL_MS = 5_000;
+const FOB_RECONCILE_INTERVAL_MS = 15_000;
+/** Periodic drift heal even with no pending flag (alarm deleted on the NVR). */
+const FOB_RECONCILE_MAX_AGE_MS = 15 * 60_000;
+/** Space out retries after a failed pass so an unreachable NVR is not hammered. */
+const FOB_RETRY_SPACING_MS = 60_000;
 
 function log(msg: string): void {
   console.log(`[worker ${new Date().toISOString()}] ${msg}`);
@@ -93,6 +99,32 @@ async function main(): Promise<void> {
     for (;;) {
       await pollFirmwareOnce(realAdapter);
       await sleep(FIRMWARE_INTERVAL_MS);
+    }
+  })().catch(() => {
+    /* best-effort */
+  });
+
+  // Keychain-remote alarm reconcile — settings edits raise the flag for a
+  // near-immediate pass; the age check heals NVR-side drift on its own.
+  (async () => {
+    for (;;) {
+      try {
+        const s = getSystemState();
+        const now = Date.now();
+        const lastAt = s.fobLastReconcileAt ?? 0;
+        const due = s.fobReprovisionFlag
+          ? s.fobLastReconcileError === null || now - lastAt >= FOB_RETRY_SPACING_MS
+          : now - lastAt >= FOB_RECONCILE_MAX_AGE_MS;
+        if (due) {
+          const r = await reconcileFobAlarms(realAdapter);
+          if (r.ran && (r.created > 0 || r.deleted > 0 || r.errors > 0)) {
+            log(`fob reconcile: +${r.created} -${r.deleted} alarms, ${r.errors} error(s)`);
+          }
+        }
+      } catch (err) {
+        console.error("[worker] fob reconcile error:", err);
+      }
+      await sleep(FOB_RECONCILE_INTERVAL_MS);
     }
   })().catch(() => {
     /* best-effort */

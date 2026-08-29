@@ -24,7 +24,7 @@ import { localDateTimeParts } from "@/lib/scheduler/time";
 import { claimNextDueRun } from "@/lib/scheduler/claim";
 import { blockedByActiveAlert } from "@/lib/alert-guard";
 import type { ProtectAdapter } from "@/lib/protect/adapter";
-import { seedUser, seedWebhookCue, seedSpeaker } from "./helpers";
+import { fakeProtectAdapter, seedUser, seedWebhookCue, seedSpeaker } from "./helpers";
 
 // Server actions run inside a Next request scope in production. Stub the two
 // seams that need one — auth and cache revalidation — so the action's own
@@ -43,17 +43,7 @@ vi.mock("@/lib/protect/talkback", async (importOriginal) => ({
   streamLoopToSpeakers: vi.fn(async () => ({ cycles: 5, frames: 500, reconnects: 0, ended: "until" as const })),
 }));
 
-function fakeAdapter(): ProtectAdapter {
-  return {
-    metaInfo: vi.fn(),
-    listSpeakers: vi.fn(),
-    patchSpeaker: vi.fn(),
-    testSound: vi.fn(),
-    triggerWebhook: vi.fn().mockResolvedValue({ status: 204, ms: 10 }),
-    speak: vi.fn().mockResolvedValue({ status: 200, ms: 50 }),
-    bootstrap: vi.fn(),
-  } as unknown as ProtectAdapter;
-}
+const fakeAdapter = (): ProtectAdapter => fakeProtectAdapter();
 
 let userId: number;
 let preambleId: number;

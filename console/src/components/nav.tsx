@@ -9,6 +9,7 @@ import {
   GraduationCap,
   Megaphone,
   Music2,
+  Radio,
   Speaker,
   ScrollText,
   Settings,
@@ -24,6 +25,7 @@ const items: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/drills", label: "Drills", icon: GraduationCap },
   { href: "/sounds", label: "Sounds", icon: Music2 },
   { href: "/speakers", label: "Speakers", icon: Speaker },
+  { href: "/remotes", label: "Remotes", icon: Radio },
   { href: "/activity", label: "Activity", icon: ScrollText },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

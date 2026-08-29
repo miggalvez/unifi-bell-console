@@ -3,20 +3,14 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
 import { executeClaimedRun } from "@/lib/scheduler/executor";
 import type { ProtectAdapter } from "@/lib/protect/adapter";
-import { insertClaimedRun, seedSpeaker, seedTtsCue } from "./helpers";
+import { fakeProtectAdapter, insertClaimedRun, seedSpeaker, seedTtsCue } from "./helpers";
 import { updateSystemState } from "@/lib/state";
 
 function fakeAdapter(overrides: Partial<ProtectAdapter>): ProtectAdapter {
-  return {
-    metaInfo: vi.fn(),
-    listSpeakers: vi.fn(),
-    patchSpeaker: vi.fn(),
-    testSound: vi.fn(),
-    triggerWebhook: vi.fn().mockResolvedValue({ status: 204, ms: 10 }),
+  return fakeProtectAdapter({
     speak: vi.fn().mockResolvedValue({ status: 200, ms: 100 }),
-    bootstrap: vi.fn(),
     ...overrides,
-  } as ProtectAdapter;
+  });
 }
 
 function netError(code: string): Error {

@@ -398,6 +398,17 @@ building first:
 cd /opt/bell-console/console && sudo -u bell -H npx tsx scripts/e2e-verify.ts
 ```
 
+**Keychain remotes (if the site uses them).** On the Remotes page, set the
+console address to `http://<host>:3000` (plain http is right here even on an
+HTTPS install — the route authenticates every press with its own token, and
+the NVR does not trust internal certificates), map one button, and press it.
+The row's "Last pressed" updates within a few seconds and the mapped sound
+plays. Scripted check (the `--live` phase waits for a real press):
+
+```bash
+cd /opt/bell-console/console && sudo -u bell -H npx tsx scripts/fob-verify.ts --live
+```
+
 **Browser recording, from a staff machine — not the server.** Only if you did
 Part 6. Open Announcements → Speak an announcement on a laptop someone will
 actually use, record a few seconds, and confirm the level meter moves and
@@ -540,6 +551,13 @@ is broken", never for "the new build has a bug".
 Afterwards, verify — re-run Part 8's "a real bell rings" step. An update that
 builds cleanly can still have lost the speaker, and the script cannot check
 that for you.
+
+**Keychain remotes.** The alarms named `Bell Console: …` in UniFi's Alarm
+Manager are machine-managed: the console recreates them within 15 minutes if
+they are deleted and takes back any hand edit — change mappings on the Remotes
+page instead. Fob batteries show on that page; Protect suppresses button
+actions while a fob is waking up for a firmware update, so update fobs at a
+quiet time and expect the first post-update press to do nothing.
 
 **Logs:**
 
