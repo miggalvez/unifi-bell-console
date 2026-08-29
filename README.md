@@ -17,6 +17,10 @@ always-on machine on your LAN, so bells keep ringing when the internet doesn't.
   continuously and stop within ~0.3s of the Stop button.
 - **Drill sequences** — scripted practice runs, always bracketed by a
   "this is a drill" announcement, aborted instantly by a real alert.
+- **Keychain remotes** (UniFi USL fobs) — map fob buttons to announcements and
+  alerts; the console provisions the NVR side automatically and hears presses
+  back in tens of milliseconds. Emergency alerts require a deliberate long or
+  double press, and every press is authenticated and audited.
 - Speaker zones, pause, DST-safe scheduling, health monitoring, full audit
   trail, plain-language UI for school staff.
 - **Today command center** with the live day timeline, next-bell countdown,

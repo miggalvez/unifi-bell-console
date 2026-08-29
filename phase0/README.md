@@ -153,6 +153,23 @@ between them. That table is the answer to three design questions at once:
 Note that Protect re-sends `update` frames for the same event id, so dedupe by
 `item.id` is needed regardless of what the fob turns out to do.
 
+**Outcome (Aug 2026, with fob in hand):** the plan above turned out to probe
+the wrong surface. Fob presses never appear on the Integration API's event
+stream at all — `watch-events` stays silent no matter how many buttons you
+press, and the fob itself is absent from the official API (`/v1/sensors` is
+empty). The private bootstrap exposes only a bare any-button timestamp with no
+identity. Full button identity (which button, single/long/double press) lives
+in UniFi OS's **v2 Alarm Manager** (`useExternalAlarmManager`): each alarm can
+match one button + press type and fire a bearer-authenticated webhook, one
+delivery per press, 15–50ms on LAN — which answers all three design questions
+(per-button identity: yes; duplicates: none observed, though the console
+dedupes anyway; single click: fires with no hold, so the console restricts
+emergency actions to long/double press). The console now ships this as the
+Remotes feature — see `console/src/lib/fobs/` and `scripts/fob-verify.ts`.
+One field note: at the edge of LoRa range a fob still reads CONNECTED while
+its button events silently fail to decode — placement of the USL-Gateway
+matters.
+
 ### After any Protect or firmware update
 
 ```
