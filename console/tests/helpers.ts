@@ -98,9 +98,13 @@ export function fakeProtectAdapter(overrides: Partial<ProtectAdapter> = {}): Pro
   };
 }
 
-export function seedFob(mac = "AABBCCDDEE01", name = "USL Fob"): string {
+export function seedFob(
+  mac = "AABBCCDDEE01",
+  name = "USL Fob",
+  buttonLabels: string | null = null,
+): string {
   db.insert(schema.fobs)
-    .values({ mac, name, state: "CONNECTED", lastPolledAt: Date.now() })
+    .values({ mac, name, state: "CONNECTED", buttonLabels, lastPolledAt: Date.now() })
     .run();
   return mac;
 }

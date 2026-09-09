@@ -1,0 +1,1 @@
+ALTER TABLE `fobs` ADD `button_labels` text;

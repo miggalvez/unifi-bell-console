@@ -17,6 +17,7 @@ export function upsertFobsFromBootstrap(b: Bootstrap, now = Date.now()): number 
       protectId: f.id ?? null,
       name: f.name ?? null,
       state: f.state ?? null,
+      buttonLabels: typeof f.buttonLabels === "string" ? f.buttonLabels : null,
       batteryStatus: f.wirelessConnectionState?.batteryStatus
         ? JSON.stringify(f.wirelessConnectionState.batteryStatus)
         : null,

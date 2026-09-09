@@ -27,6 +27,14 @@ import {
 import { Field, SelectField, StatusDot } from "@/components/fields";
 import { swrFetcher, timeAgo } from "@/lib/format";
 import {
+  FOB_BUTTON_KEYS,
+  FOB_PRESS_KEYS,
+  FOB_PRESS_MENU_LABELS,
+  fobButtonLabel,
+  fobFaceplateName,
+  isNumberFaceplate,
+} from "@/lib/fobs/labels";
+import {
   createFobMapping,
   deleteFobMapping,
   reapplyFobAlarms,
@@ -35,20 +43,6 @@ import {
   updateFobMapping,
 } from "./actions";
 
-// UI copies of the enum labels — the provisioning module is server-only.
-const BUTTON_LABELS: Record<string, string> = {
-  arm: "Arm",
-  night: "Night Mode",
-  disarm: "Disarm",
-  panic: "Panic",
-  left: "Left",
-  right: "Right",
-};
-const PRESS_LABELS: Record<string, string> = {
-  press: "Single press",
-  longPress: "Long press (3s)",
-  doublePress: "Double press",
-};
 const ACTION_LABELS: Record<string, string> = {
   START_ALERT: "Start repeating alert",
   TRIGGER_CUE: "Play once",
@@ -66,6 +60,7 @@ interface FobRow {
   mac: string;
   name: string | null;
   state: string | null;
+  buttonLabels: string | null;
   batteryStatus: string | null;
   firmwareVersion: string | null;
   lastSeenAt: number | null;
@@ -158,12 +153,14 @@ function Battery({ raw }: { raw: string | null }) {
 function MappingDialog({
   cues,
   fobMac,
+  labelMode,
   mapping,
   open,
   onOpenChange,
 }: {
   cues: CueOption[];
   fobMac: string;
+  labelMode: string | null;
   mapping: MappingRow | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -214,11 +211,17 @@ function MappingDialog({
         </DialogHeader>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Button">
+            <Field
+              label="Button"
+              hint={isNumberFaceplate(labelMode) ? "As printed on the fob" : undefined}
+            >
               <SelectField
                 value={button}
                 onValueChange={setButton}
-                options={Object.entries(BUTTON_LABELS).map(([value, label]) => ({ value, label }))}
+                options={FOB_BUTTON_KEYS.map((key) => ({
+                  value: key,
+                  label: fobButtonLabel(key, labelMode, { long: true }),
+                }))}
               />
             </Field>
             <Field
@@ -228,9 +231,9 @@ function MappingDialog({
               <SelectField
                 value={pressType}
                 onValueChange={setPressType}
-                options={Object.entries(PRESS_LABELS).map(([value, label]) => ({
-                  value,
-                  label,
+                options={FOB_PRESS_KEYS.map((key) => ({
+                  value: key,
+                  label: FOB_PRESS_MENU_LABELS[key],
                 }))}
               />
             </Field>
@@ -297,10 +300,12 @@ function MappingDialog({
 function MappingRows({
   mappings,
   cues,
+  labelMode,
   onEdit,
 }: {
   mappings: MappingRow[];
   cues: CueOption[];
+  labelMode: string | null;
   onEdit: (m: MappingRow) => void;
 }) {
   const [pending, startTransition] = useTransition();
@@ -322,8 +327,10 @@ function MappingRows({
       <TableBody>
         {mappings.map((m) => (
           <TableRow key={m.id}>
-            <TableCell className="font-medium">{BUTTON_LABELS[m.button] ?? m.button}</TableCell>
-            <TableCell className="text-sm text-muted-foreground">{PRESS_LABELS[m.pressType] ?? m.pressType}</TableCell>
+            <TableCell className="font-medium">{fobButtonLabel(m.button, labelMode)}</TableCell>
+            <TableCell className="text-sm text-muted-foreground">
+              {FOB_PRESS_MENU_LABELS[m.pressType as keyof typeof FOB_PRESS_MENU_LABELS] ?? m.pressType}
+            </TableCell>
             <TableCell className="text-sm">
               {ACTION_LABELS[m.action]}
               {m.cueId != null ? <span className="text-muted-foreground"> — {cueName(m.cueId)}</span> : null}
@@ -468,6 +475,7 @@ export function RemotesPanel({
                         <CardDescription className="mt-1 font-mono text-xs">
                           {mac}
                           {fob?.firmwareVersion ? ` · fw ${fob.firmwareVersion}` : ""}
+                          {fob ? ` · ${fobFaceplateName(fob.buttonLabels)} faceplate` : ""}
                           {fob?.lastSeenAt ? ` · seen ${timeAgo(fob.lastSeenAt)}` : ""}
                         </CardDescription>
                       </div>
@@ -484,7 +492,12 @@ export function RemotesPanel({
                       </p>
                     ) : (
                       <div className="overflow-hidden rounded-lg border">
-                        <MappingRows mappings={rows} cues={cues} onEdit={(m) => setDialog({ fobMac: mac, mapping: m })} />
+                        <MappingRows
+                          mappings={rows}
+                          cues={cues}
+                          labelMode={fob?.buttonLabels ?? null}
+                          onEdit={(m) => setDialog({ fobMac: mac, mapping: m })}
+                        />
                       </div>
                     )}
                   </CardContent>
@@ -535,6 +548,7 @@ export function RemotesPanel({
           key={dialog.mapping?.id ?? `new-${dialog.fobMac}`}
           cues={cues}
           fobMac={dialog.fobMac}
+          labelMode={fobs.find((f) => f.mac === dialog.fobMac)?.buttonLabels ?? null}
           mapping={dialog.mapping}
           open
           onOpenChange={(open) => {

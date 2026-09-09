@@ -18,6 +18,7 @@ import { db, schema, sqlite } from "@/lib/db/client";
 import { getSetting, updateSystemState } from "@/lib/state";
 import { writeAudit } from "@/lib/audit";
 import type { ProtectAdapter } from "@/lib/protect/adapter";
+import { FOB_PRESS_LABELS, fobButtonLabel } from "./labels";
 
 export const FOB_ALARM_TITLE_PREFIX = "Bell Console: ";
 export const FOB_TRIGGER_ID = "protect:button.buttonPressed";
@@ -31,24 +32,14 @@ export type FobMappingRow = typeof schema.fobMappings.$inferSelect;
 export type FobButton = FobMappingRow["button"];
 export type FobPressType = FobMappingRow["pressType"];
 
-export const FOB_BUTTON_LABELS: Record<FobButton, string> = {
-  arm: "Arm",
-  night: "Night Mode",
-  disarm: "Disarm",
-  panic: "Panic",
-  left: "Left",
-  right: "Right",
-};
-
-export const FOB_PRESS_LABELS: Record<FobPressType, string> = {
-  press: "single press",
-  longPress: "long press",
-  doublePress: "double press",
-};
-
-export function buildAlarmTitle(m: FobMappingRow, fobName: string | null): string {
+export function buildAlarmTitle(
+  m: FobMappingRow,
+  fobName: string | null,
+  labelMode: string | null,
+): string {
   const who = fobName?.trim() || m.fobMac;
-  return `${FOB_ALARM_TITLE_PREFIX}${who} — ${FOB_BUTTON_LABELS[m.button]} (${FOB_PRESS_LABELS[m.pressType]}) [#${m.id}]`;
+  const button = fobButtonLabel(m.button, labelMode, { long: true });
+  return `${FOB_ALARM_TITLE_PREFIX}${who} — ${button} (${FOB_PRESS_LABELS[m.pressType]}) [#${m.id}]`;
 }
 
 /** Scope token format verified against the NVR's live all-buttons catalogue. */
@@ -63,14 +54,23 @@ export function buildWebhookUrl(baseUrl: string, mappingId: number): string {
 /**
  * What must match on the NVR for the alarm to be considered current. Action
  * and cue are deliberately absent: they are console-side dispatch, and
- * changing them must not churn NVR alarms.
+ * changing them must not churn NVR alarms. The faceplate mode IS included —
+ * it is baked into the alarm title, so swapping faceplates should rename the
+ * alarms rather than leave the NVR calling button 4 "Panic".
  */
 export function desiredConfigHash(
   m: Pick<FobMappingRow, "fobMac" | "button" | "pressType">,
   baseUrl: string,
+  labelMode: string | null = null,
 ): string {
   return sha256hex(
-    JSON.stringify({ fobMac: m.fobMac, button: m.button, pressType: m.pressType, baseUrl }),
+    JSON.stringify({
+      fobMac: m.fobMac,
+      button: m.button,
+      pressType: m.pressType,
+      baseUrl,
+      labelMode,
+    }),
   );
 }
 
@@ -233,9 +233,16 @@ export async function reconcileFobAlarms(
       return { ran: true, supported, created, deleted, errors: errors + 1 };
     }
 
-    const fobNames = new Map(
-      db.select({ mac: schema.fobs.mac, name: schema.fobs.name }).from(schema.fobs).all()
-        .map((f) => [f.mac, f.name] as const),
+    const fobInfo = new Map(
+      db
+        .select({
+          mac: schema.fobs.mac,
+          name: schema.fobs.name,
+          buttonLabels: schema.fobs.buttonLabels,
+        })
+        .from(schema.fobs)
+        .all()
+        .map((f) => [f.mac, f] as const),
     );
 
     const knownIds = new Set(mappings.map((m) => m.nvrAlarmId).filter((x): x is string => !!x));
@@ -276,7 +283,9 @@ export async function reconcileFobAlarms(
     // Create / recreate every enabled mapping that is missing or stale.
     const validAlarmIds = new Set<string>();
     for (const m of enabled) {
-      const desired = desiredConfigHash(m, baseUrl!);
+      const fob = fobInfo.get(m.fobMac);
+      const labelMode = fob?.buttonLabels ?? null;
+      const desired = desiredConfigHash(m, baseUrl!, labelMode);
       const existing = m.nvrAlarmId ? ownedById.get(m.nvrAlarmId) : undefined;
 
       let stale =
@@ -306,7 +315,7 @@ export async function reconcileFobAlarms(
         }
         const token = randomBytes(32).toString("base64url");
         const alarmId = await adapter.createAlarm({
-          title: buildAlarmTitle(m, fobNames.get(m.fobMac) ?? null),
+          title: buildAlarmTitle(m, fob?.name ?? null, labelMode),
           pressType: m.pressType,
           scopeValue: buildScopeValue(m),
           webhook: { url: buildWebhookUrl(baseUrl!, m.id), token },

@@ -459,6 +459,12 @@ export const fobs = sqliteTable("fobs", {
   protectId: text("protect_id"), // bootstrap fob id, informational
   name: text("name"),
   state: text("state"),
+  /**
+   * Which faceplate is fitted: 'securityActions' (padlock/moon/…) or
+   * 'positionHint' (1/2/3/4). Set in UniFi Protect; we mirror it so the
+   * console names buttons the way the person holding the fob sees them.
+   */
+  buttonLabels: text("button_labels"),
   batteryStatus: text("battery_status"), // JSON wirelessConnectionState.batteryStatus
   firmwareVersion: text("firmware_version"),
   lastSeenAt: integer("last_seen_at"), // fob's own lastSeen from Protect

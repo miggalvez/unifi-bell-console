@@ -34,6 +34,8 @@ export interface PrivateFob {
   state?: string;
   firmwareVersion?: string;
   lastSeen?: number;
+  /** Fitted faceplate: 'securityActions' | 'positionHint' (numbered). */
+  buttonLabels?: string;
   wirelessConnectionState?: {
     batteryStatus?: { percentage?: number; isLow?: boolean };
     [key: string]: unknown;

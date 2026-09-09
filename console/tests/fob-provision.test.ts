@@ -43,12 +43,23 @@ describe("builders", () => {
   it("builds titles inside the ownership prefix, unique per mapping", () => {
     const cueId = seedTtsCue();
     const id = seedFobMapping({ action: "TRIGGER_CUE", cueId });
-    const title = buildAlarmTitle(mappingRow(id), "Front Office");
+    const title = buildAlarmTitle(mappingRow(id), "Front Office", null);
     expect(title.startsWith(FOB_ALARM_TITLE_PREFIX)).toBe(true);
     expect(title).toContain("Front Office");
     expect(title).toContain(`[#${id}]`);
     // Falls back to the MAC when the fob has no name.
-    expect(buildAlarmTitle(mappingRow(id), null)).toContain(MAC);
+    expect(buildAlarmTitle(mappingRow(id), null, null)).toContain(MAC);
+  });
+
+  it("names buttons the way the fitted faceplate does", () => {
+    const cueId = seedTtsCue();
+    const id = seedFobMapping({ action: "TRIGGER_CUE", cueId, button: "panic" });
+    // Security faceplate: the panic button is "Panic".
+    expect(buildAlarmTitle(mappingRow(id), "Fob", "securityActions")).toContain("Panic");
+    // Numbers faceplate: the same physical button is printed "4".
+    const numbered = buildAlarmTitle(mappingRow(id), "Fob", "positionHint");
+    expect(numbered).toContain("Button 4");
+    expect(numbered).not.toContain("Panic");
   });
 
   it("builds the scope token the NVR's catalogue uses", () => {
@@ -66,6 +77,8 @@ describe("builders", () => {
     expect(desiredConfigHash(m, BASE)).toBe(base);
     expect(desiredConfigHash({ ...m, pressType: "press" }, BASE)).not.toBe(base);
     expect(desiredConfigHash(m, "http://elsewhere:3000")).not.toBe(base);
+    // The faceplate is baked into the alarm title, so it counts as NVR state.
+    expect(desiredConfigHash(m, BASE, "positionHint")).not.toBe(base);
   });
 
   it.each([
@@ -129,6 +142,26 @@ describe("reconcileFobAlarms", () => {
     const third = await reconcileFobAlarms(adapter);
     expect(third).toMatchObject({ created: 1, deleted: 1 });
     expect(vi.mocked(adapter.deleteAlarm)).toHaveBeenCalledWith(alarmId);
+  });
+
+  it("renames alarms on the NVR when the faceplate is swapped", async () => {
+    seedFob(MAC, "Front Office", "securityActions");
+    const cueId = seedTtsCue();
+    const id = seedFobMapping({ action: "TRIGGER_CUE", cueId, button: "panic" });
+    const adapter = fakeProtectAdapter();
+    await reconcileFobAlarms(adapter);
+    expect(vi.mocked(adapter.createAlarm).mock.calls[0][0].title).toContain("Panic");
+
+    // Admin fits the numbered faceplate and flips the setting in Protect.
+    db.update(schema.fobs).set({ buttonLabels: "positionHint" }).where(eq(schema.fobs.mac, MAC)).run();
+    const alarmId = mappingRow(id).nvrAlarmId!;
+    vi.mocked(adapter.listAlarms).mockResolvedValue([
+      { id: alarmId, title: `${FOB_ALARM_TITLE_PREFIX}x [#${id}]`, raw: {} },
+    ]);
+
+    const r = await reconcileFobAlarms(adapter);
+    expect(r).toMatchObject({ created: 1, deleted: 1 });
+    expect(vi.mocked(adapter.createAlarm).mock.calls[1][0].title).toContain("Button 4");
   });
 
   it("recreates when the NVR-side config was edited by hand", async () => {
