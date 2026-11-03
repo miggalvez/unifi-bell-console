@@ -5,6 +5,7 @@ import { updateSystemState } from "@/lib/state";
 import { writeAudit } from "@/lib/audit";
 import { DateTime } from "luxon";
 import { env } from "@/env";
+import { localToUtcEpoch } from "@/lib/scheduler/time";
 
 export interface PauseResult {
   ok: boolean;
@@ -29,9 +30,7 @@ export async function setPause(formData: FormData): Promise<PauseResult> {
     pausedUntil = localNow.endOf("day").toMillis();
   } else if (minutesRaw === "until_time") {
     if (!/^\d{2}:\d{2}$/.test(pauseUntilRaw)) return { ok: false, error: "Pick a resume time." };
-    pausedUntil = DateTime.fromISO(`${localNow.toFormat("yyyy-MM-dd")}T${pauseUntilRaw}`, {
-      zone: env.schoolTz,
-    }).toMillis();
+    pausedUntil = localToUtcEpoch(localNow.toFormat("yyyy-MM-dd"), pauseUntilRaw);
   } else {
     pausedUntil = now + Number(minutesRaw) * 60_000;
   }

@@ -8,6 +8,7 @@ import { env } from "@/env";
 import { requireAdmin } from "@/lib/auth/guards";
 import { writeAudit } from "@/lib/audit";
 import { materialize } from "@/lib/scheduler/materializer";
+import { localToUtcEpoch } from "@/lib/scheduler/time";
 
 export interface TodayActionResult {
   ok: boolean;
@@ -164,8 +165,10 @@ export async function clearTodayBellOverride(overrideId: number): Promise<TodayA
     .get();
   if (!override || override.localDate !== localDate) return { ok: false, error: "That change is no longer active today." };
 
-  const activeTime = override.kind === "DELAY" ? override.effectiveTime : override.originalTime;
-  const activeAt = DateTime.fromISO(`${localDate}T${activeTime}`, { zone: env.schoolTz }).toMillis();
+  // Same rule as the materializer: a DELAY without a time rings at the original.
+  const activeTime =
+    override.kind === "DELAY" && override.effectiveTime ? override.effectiveTime : override.originalTime;
+  const activeAt = localToUtcEpoch(localDate, activeTime);
   if (activeAt - now <= CHANGE_SAFETY_MS) {
     return { ok: false, error: "That bell is already starting or has passed, so the change cannot be undone." };
   }
@@ -173,7 +176,7 @@ export async function clearTodayBellOverride(overrideId: number): Promise<TodayA
   // neither time: the delayed run is deleted, and re-materializing cannot
   // recreate a bell in the past. Refuse rather than silently dropping it.
   if (override.kind === "DELAY") {
-    const originalAt = DateTime.fromISO(`${localDate}T${override.originalTime}`, { zone: env.schoolTz }).toMillis();
+    const originalAt = localToUtcEpoch(localDate, override.originalTime);
     if (originalAt - now <= CHANGE_SAFETY_MS) {
       return {
         ok: false,
