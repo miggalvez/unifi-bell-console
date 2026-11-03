@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, asc, count, eq, gt } from "drizzle-orm";
+import { and, asc, eq, gt } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
 import { getApiUser } from "@/lib/auth/guards";
 import { getSystemState, isPaused } from "@/lib/state";
@@ -16,13 +16,19 @@ export async function GET() {
 
   const state = getSystemState();
   const now = Date.now();
-  const speakersTotal = db.select({ n: count() }).from(schema.speakers).get()?.n ?? 0;
-  const speakersOnline =
-    db
-      .select({ n: count() })
-      .from(schema.speakers)
-      .where(eq(schema.speakers.state, "CONNECTED"))
-      .get()?.n ?? 0;
+  const speakerRows = db
+    .select({
+      name: schema.speakers.name,
+      mac: schema.speakers.mac,
+      state: schema.speakers.state,
+      lastSeenOnlineAt: schema.speakers.lastSeenOnlineAt,
+    })
+    .from(schema.speakers)
+    .all();
+  // Which ones, not just how many — staff need to know which rooms go unheard.
+  const speakersOffline = speakerRows
+    .filter((s) => s.state !== "CONNECTED")
+    .map((s) => ({ name: s.name ?? s.mac, lastSeenOnlineAt: s.lastSeenOnlineAt }));
 
   const keyDaysLeft =
     state.apiKeyExpiresAt === null ? null : Math.floor((state.apiKeyExpiresAt - now) / 86_400_000);
@@ -60,7 +66,11 @@ export async function GET() {
       degraded: state.consecutiveHealthFailures >= 3,
       usingCloudFallback: state.usingCloudFallback,
     },
-    speakers: { online: speakersOnline, total: speakersTotal },
+    speakers: {
+      online: speakerRows.length - speakersOffline.length,
+      total: speakerRows.length,
+      offline: speakersOffline,
+    },
     tts: { revalidate: state.ttsRevalidateFlag, reason: state.ttsFlagReason },
     apiKey: { expiresAt: state.apiKeyExpiresAt, daysLeft: keyDaysLeft, warning: keyDaysLeft !== null && keyDaysLeft < 7 },
   });

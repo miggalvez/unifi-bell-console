@@ -176,10 +176,16 @@ export function getTodaySchedule(now = Date.now()): TodayScheduleSnapshot {
   if (state.consecutiveHealthFailures >= 3 || !healthFresh) {
     issues.push("The speaker system has not passed a recent connection check.");
   }
-  const speakers = db.select({ state: schema.speakers.state }).from(schema.speakers).all();
-  const online = speakers.filter((speaker) => speaker.state === "CONNECTED").length;
+  const speakers = db
+    .select({ state: schema.speakers.state, name: schema.speakers.name, mac: schema.speakers.mac })
+    .from(schema.speakers)
+    .all();
+  // Named, not counted: "2 speakers are offline" sat unread for five days.
+  const offline = speakers.filter((speaker) => speaker.state !== "CONNECTED").map((s) => s.name ?? s.mac);
   if (speakers.length === 0) issues.push("No speakers have been discovered.");
-  else if (online < speakers.length) issues.push(`${speakers.length - online} speaker${speakers.length - online === 1 ? " is" : "s are"} offline.`);
+  else if (offline.length > 0) {
+    issues.push(`${offline.length} speaker${offline.length === 1 ? " is" : "s are"} offline: ${offline.join(", ")}.`);
+  }
   if (state.lastMaterializedThrough === null || state.lastMaterializedThrough < localDate) {
     issues.push("Today's bell schedule has not been prepared.");
   }

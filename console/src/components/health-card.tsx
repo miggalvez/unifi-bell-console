@@ -17,7 +17,11 @@ interface StatusPayload {
     degraded: boolean;
     usingCloudFallback: boolean;
   };
-  speakers: { online: number; total: number };
+  speakers: {
+    online: number;
+    total: number;
+    offline: { name: string; lastSeenOnlineAt: number | null }[];
+  };
   tts: { revalidate: boolean; reason: string | null };
   apiKey: { expiresAt: number | null; daysLeft: number | null; warning: boolean };
 }
@@ -50,6 +54,31 @@ export function HealthCard() {
             They should travel over the school network instead, so they keep working if the internet
             goes down. Ask whoever supports this console to create a new key on the UniFi console
             itself (Protect → Integrations).
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {/* While the whole system is unreachable every speaker reads as offline;
+          the alert above already says so. */}
+      {!health.degraded && speakers.offline.length > 0 ? (
+        <Alert>
+          <SpeakerIcon />
+          <AlertTitle>
+            {speakers.offline.length === 1
+              ? `${speakers.offline[0].name} is offline`
+              : `${speakers.offline.length} speakers are offline`}
+          </AlertTitle>
+          <AlertDescription>
+            Bells and announcements will not be heard where{" "}
+            {speakers.offline.length === 1 ? "it is" : "they are"}:{" "}
+            {speakers.offline
+              .map((s) =>
+                s.lastSeenOnlineAt === null
+                  ? `${s.name} (never seen online)`
+                  : `${s.name} (last online ${timeAgo(s.lastSeenOnlineAt, data.now)})`,
+              )
+              .join(", ")}
+            . Check that {speakers.offline.length === 1 ? "it has" : "they have"} power and a network
+            connection, then look at {speakers.offline.length === 1 ? "it" : "them"} in UniFi Protect.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -103,7 +132,9 @@ export function HealthCard() {
               {speakers.online} of {speakers.total}
             </p>
             <p className="text-xs text-muted-foreground">
-              {speakers.online === speakers.total ? "all speakers responding" : "some speakers are offline"}
+              {speakers.offline.length === 0
+                ? "all speakers responding"
+                : `offline: ${speakers.offline.map((s) => s.name).join(", ")}`}
             </p>
           </CardContent>
         </Card>

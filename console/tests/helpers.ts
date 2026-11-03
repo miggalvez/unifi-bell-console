@@ -1,6 +1,7 @@
 import { vi } from "vitest";
 import { db, schema } from "@/lib/db/client";
 import type { ProtectAdapter } from "@/lib/protect/adapter";
+import type { FanOutResult } from "@/lib/protect/talkback";
 import { FOB_TRIGGER_ID } from "@/lib/fobs/provision";
 
 export function seedUser(): number {
@@ -148,4 +149,9 @@ export function insertClaimedRun(values: Partial<typeof schema.scheduledRuns.$in
     })
     .returning({ id: schema.scheduledRuns.id })
     .get().id;
+}
+
+/** What streamToSpeakers resolves to when every speaker took the whole stream. */
+export function heardEverywhere(ids: string[], frames = 120): FanOutResult {
+  return { frames, sent: ids.map(() => frames), missed: [] };
 }

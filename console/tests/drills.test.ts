@@ -24,7 +24,7 @@ import { localDateTimeParts } from "@/lib/scheduler/time";
 import { claimNextDueRun } from "@/lib/scheduler/claim";
 import { blockedByActiveAlert } from "@/lib/alert-guard";
 import type { ProtectAdapter } from "@/lib/protect/adapter";
-import { fakeProtectAdapter, seedUser, seedWebhookCue, seedSpeaker } from "./helpers";
+import { fakeProtectAdapter, heardEverywhere, seedUser, seedWebhookCue, seedSpeaker } from "./helpers";
 
 // Server actions run inside a Next request scope in production. Stub the two
 // seams that need one — auth and cache revalidation — so the action's own
@@ -39,8 +39,8 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 // ffmpeg. Stub that one seam so the drill logic itself is what is under test.
 vi.mock("@/lib/protect/talkback", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/protect/talkback")>()),
-  streamToSpeakers: vi.fn(async () => [120]),
-  streamLoopToSpeakers: vi.fn(async () => ({ cycles: 5, frames: 500, reconnects: 0, ended: "until" as const })),
+  streamToSpeakers: vi.fn(async (ids: string[]) => ({ frames: 120, sent: ids.map(() => 120), missed: [] })),
+  streamLoopToSpeakers: vi.fn(async () => ({ cycles: 5, frames: 500, reconnects: 0, ended: "until" as const, missed: [] })),
 }));
 
 const fakeAdapter = (): ProtectAdapter => fakeProtectAdapter();
@@ -639,12 +639,12 @@ describe("a refused talkback session does not kill the drill", () => {
     // Refused once — the speaker was still releasing the previous session —
     // then fine, exactly the pattern seen on hardware.
     let calls = 0;
-    mocked.mockImplementation(async () => {
+    mocked.mockImplementation(async (ids: string[]) => {
       calls += 1;
       if (calls === 1) {
         throw new TalkbackError("the speaker closed the talkback session", false, { retryable: true });
       }
-      return [120];
+      return heardEverywhere(ids);
     });
 
     const rec = seedRecordedCue("Refused once");
@@ -657,7 +657,7 @@ describe("a refused talkback session does not kill the drill", () => {
     expect(calls).toBe(2); // one refusal, one success
     expect(readDrillState().active).toBe(true); // and the drill carries on
 
-    mocked.mockImplementation(async () => [120]);
+    mocked.mockImplementation(async (ids: string[]) => heardEverywhere(ids));
   }, 20_000);
 
   it("gives up without retrying when the failure cannot clear", async () => {
@@ -683,7 +683,7 @@ describe("a refused talkback session does not kill the drill", () => {
     expect(run.status).toBe("FAILED");
     expect(run.resultMessage).toMatch(/ffmpeg/i);
 
-    mocked.mockImplementation(async () => [120]);
+    mocked.mockImplementation(async (ids: string[]) => heardEverywhere(ids));
   });
 });
 
@@ -692,9 +692,9 @@ describe("a recorded announcement is spliced onto the sound", () => {
     const { streamToSpeakers } = await import("@/lib/protect/talkback");
     const mocked = streamToSpeakers as unknown as ReturnType<typeof vi.fn>;
     const opts: unknown[] = [];
-    mocked.mockImplementation(async (_ids: string[], o: unknown) => {
+    mocked.mockImplementation(async (ids: string[], o: unknown) => {
       opts.push(o);
-      return [120];
+      return heardEverywhere(ids);
     });
 
     // Both the tag and the sound are recordings.
@@ -720,7 +720,7 @@ describe("a recorded announcement is spliced onto the sound", () => {
     expect(JSON.parse(run.audioPaths!)).toHaveLength(2);
 
     setSetting("drillPreambleCueId", null);
-    mocked.mockImplementation(async () => [120]);
+    mocked.mockImplementation(async (ids: string[]) => heardEverywhere(ids));
   });
 
   it("abandons the drill if the spliced stream fails — the tag was inside it", async () => {
@@ -740,7 +740,7 @@ describe("a recorded announcement is spliced onto the sound", () => {
     expect(abort.detail).toMatch(/announcement did not play/i);
 
     setSetting("drillPreambleCueId", null);
-    mocked.mockImplementation(async () => [120]);
+    mocked.mockImplementation(async (ids: string[]) => heardEverywhere(ids));
   });
 
   it("still uses two sessions when the announcement is spoken, not recorded", async () => {
@@ -762,7 +762,7 @@ describe("a repeating recorded phase streams continuously", () => {
   it("plays the whole phase as ONE looped session, then advances", async () => {
     const mock = await loopMock();
     mock.mockClear();
-    mock.mockImplementation(async () => ({ cycles: 9, frames: 900, reconnects: 0, ended: "until" as const }));
+    mock.mockImplementation(async () => ({ cycles: 9, frames: 900, reconnects: 0, ended: "until" as const, missed: [] }));
 
     const recTag = seedRecordedCue("Loop tag");
     setSetting("drillPreambleCueId", recTag);
@@ -821,7 +821,7 @@ describe("a repeating recorded phase streams continuously", () => {
     stopDrill(userId);
     expect(captured!.shouldStop()).toBe(true); // the frame loop sees this within ~43ms
 
-    finish({ cycles: 1, frames: 100, reconnects: 0, ended: "stopped" });
+    finish({ cycles: 1, frames: 100, reconnects: 0, ended: "stopped", missed: [] });
     await drillStreamSettled();
     setSetting("drillPreambleCueId", null);
   });
@@ -829,7 +829,7 @@ describe("a repeating recorded phase streams continuously", () => {
   it("resumes the stream after a worker restart mid-phase", async () => {
     const mock = await loopMock();
     mock.mockClear();
-    mock.mockImplementation(async () => ({ cycles: 3, frames: 300, reconnects: 0, ended: "until" as const }));
+    mock.mockImplementation(async () => ({ cycles: 3, frames: 300, reconnects: 0, ended: "until" as const, missed: [] }));
 
     const recTag = seedRecordedCue("Resume tag");
     setSetting("drillPreambleCueId", recTag);
@@ -935,9 +935,9 @@ describe("combined announcements (chime + message as one cue)", () => {
     const mock = streamToSpeakers as unknown as ReturnType<typeof vi.fn>;
     mock.mockClear();
     const captured: unknown[] = [];
-    mock.mockImplementation(async (_ids: string[], o: unknown) => {
+    mock.mockImplementation(async (ids: string[], o: unknown) => {
       captured.push(o);
-      return [260];
+      return heardEverywhere(ids, 260);
     });
 
     const chime = seedAudio("Attention chime", 3000);
@@ -963,7 +963,7 @@ describe("combined announcements (chime + message as one cue)", () => {
     const run = db.select().from(schema.scheduledRuns).where(eq(schema.scheduledRuns.id, runId)).get()!;
     expect(run.deliveryMethod).toBe("PROTECT_TALKBACK_AUDIO");
     expect(JSON.parse(run.audioPaths!)).toHaveLength(2);
-    mock.mockImplementation(async () => [120]);
+    mock.mockImplementation(async (ids: string[]) => heardEverywhere(ids));
   });
 
   it("refuses fewer than two parts", async () => {
@@ -993,5 +993,104 @@ describe("combined announcements (chime + message as one cue)", () => {
     expect(cue.estimatedDurationMs).toBe(11_000);
     const parts = db.select().from(schema.soundCueParts).where(eq(schema.soundCueParts.cueId, cue.id)).all();
     expect(parts.map((p) => p.audioFileId)).toEqual([chime, msg]);
+  });
+});
+
+describe("a speaker that misses part of a drill does not end it", () => {
+  // Hall (seeded for every test) plus a basement speaker that drops out.
+  const gymId = "spk-BBB000";
+  function ensureGym(): void {
+    if (!db.select().from(schema.speakers).where(eq(schema.speakers.id, gymId)).get()) {
+      seedSpeaker("BBB000", "Basement Gym");
+      db.update(schema.speakers).set({ state: "DISCONNECTED" }).where(eq(schema.speakers.id, gymId)).run();
+    }
+  }
+
+  async function streamMock() {
+    const { streamToSpeakers } = await import("@/lib/protect/talkback");
+    return streamToSpeakers as unknown as ReturnType<typeof vi.fn>;
+  }
+
+  /** What the streamer reports when the basement speaker heard nothing. */
+  const gymMissed = (ids: string[]) => ({
+    frames: 120,
+    sent: ids.map((id) => (id === gymId ? 0 : 120)),
+    missed: [{ speakerId: gymId, partial: false, error: "talkback WS rejected: HTTP 500" }],
+  });
+
+  const aborts = () =>
+    db.select().from(schema.auditLog).where(eq(schema.auditLog.action, "drill.abort")).all().length;
+
+  it("a spliced announcement + sound that missed a speaker counts as played", async () => {
+    ensureGym();
+    const mocked = await streamMock();
+    mocked.mockImplementationOnce(async (ids: string[]) => gymMissed(ids));
+    const recTag = seedRecordedCue("Partial tag");
+    setSetting("drillPreambleCueId", recTag);
+    const alert = seedRecordedCue("Partial alert");
+    startDrill({ sequenceId: seedSequence([{ kind: "PLAY", cueId: alert }, { kind: "PLAY", cueId: allClearId }]), userId });
+    const abortsBefore = aborts();
+
+    expect(await tickDrill(fakeAdapter())).toBe("played");
+    expect(readDrillState().active).toBe(true);
+    expect(aborts()).toBe(abortsBefore);
+    const run = db.select().from(schema.scheduledRuns).all().at(-1)!;
+    expect(run.status).toBe("PARTIAL");
+    expect(run.resultMessage).toMatch(/1 of 2 speakers missed it: Basement Gym \(Protect reports it disconnected\)/);
+
+    stopDrill(userId);
+    setSetting("drillPreambleCueId", null);
+  });
+
+  it("a recorded announcement that missed a speaker still announces", async () => {
+    ensureGym();
+    const mocked = await streamMock();
+    mocked.mockImplementationOnce(async (ids: string[]) => gymMissed(ids));
+    const recTag = seedRecordedCue("Partial lone tag");
+    setSetting("drillPreambleCueId", recTag);
+    // A webhook sound cannot be spliced, so the tag plays on its own.
+    startDrill({ sequenceId: seedSequence([{ kind: "PLAY", cueId: lockdownId }]), userId });
+
+    expect(await tickDrill(fakeAdapter())).toBe("announced");
+    expect(readDrillState().active).toBe(true);
+    expect(db.select().from(schema.scheduledRuns).all().at(-1)!.status).toBe("PARTIAL");
+
+    stopDrill(userId);
+    setSetting("drillPreambleCueId", null);
+  });
+
+  it("a looped phase that lost a speaker is recorded PARTIAL and still advances", async () => {
+    ensureGym();
+    const { streamLoopToSpeakers } = await import("@/lib/protect/talkback");
+    const loop = streamLoopToSpeakers as unknown as ReturnType<typeof vi.fn>;
+    loop.mockImplementationOnce(async () => ({
+      cycles: 9,
+      frames: 900,
+      reconnects: 0,
+      ended: "until" as const,
+      missed: [{ speakerId: gymId, partial: false, error: "could not (re)establish the talkback session" }],
+    }));
+    const recTag = seedRecordedCue("Partial loop tag");
+    setSetting("drillPreambleCueId", recTag);
+    const alert = seedRecordedCue("Partial loop alert");
+    startDrill({
+      sequenceId: seedSequence([
+        { kind: "PLAY", cueId: alert, repeatForSeconds: 240 },
+        { kind: "PLAY", cueId: allClearId },
+      ]),
+      userId,
+    });
+
+    expect(await tickDrill(fakeAdapter())).toBe("played");
+    await drillStreamSettled();
+
+    const run = db.select().from(schema.scheduledRuns).all().at(-1)!;
+    expect(run.status).toBe("PARTIAL");
+    expect(run.resultMessage).toMatch(/^1 of 2 speakers missed it: Basement Gym .* — sounded 9× as one continuous stream$/);
+    expect(readDrillState().active).toBe(true);
+    expect(readDrillState().stepIndex).toBe(1);
+
+    stopDrill(userId);
+    setSetting("drillPreambleCueId", null);
   });
 });

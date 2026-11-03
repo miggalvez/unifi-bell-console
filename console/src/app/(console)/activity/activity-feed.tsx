@@ -55,6 +55,11 @@ const SOURCE_LABEL: Record<RunItem["source"], string> = {
 /** Plain-English status wording — staff should never meet a raw status code. */
 const STATUS: Record<string, { label: string; style: string; hint: string }> = {
   SUCCESS: { label: "Played", style: "bg-success/10 text-success", hint: "Sent to the speakers successfully" },
+  PARTIAL: {
+    label: "Some speakers missed it",
+    style: "bg-warning/10 text-warning",
+    hint: "It played, but not on every speaker — the details name the ones that missed it. Check that they are online in UniFi Protect.",
+  },
   FAILED: { label: "Did not play", style: "bg-destructive/10 text-destructive", hint: "Something went wrong — nothing was heard" },
   DELIVERY_UNCERTAIN: {
     label: "Not confirmed",
@@ -149,6 +154,8 @@ function RunsTable({ runs }: { runs: RunItem[] }) {
               {r.resultMessage ? ` ${r.resultMessage}` : ""}
             </TableCell>
             <TableCell className="text-right">
+              {/* Not for PARTIAL: playing it again would ring twice in every
+                  room that already heard it. */}
               {r.status === "DELIVERY_UNCERTAIN" || r.status === "FAILED" ? (
                 <RetriggerButton runId={r.id} />
               ) : null}

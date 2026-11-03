@@ -265,6 +265,8 @@ export const scheduledRuns = sqliteTable(
         "CLAIMED",
         "EXECUTING",
         "SUCCESS",
+        // Played, but at least one target speaker got none or only part of it.
+        "PARTIAL",
         "FAILED",
         "MISSED",
         "DELIVERY_UNCERTAIN",

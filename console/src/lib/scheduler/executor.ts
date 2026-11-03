@@ -21,7 +21,7 @@ import {
   forceClaimSpeaker,
   releaseSpeaker,
 } from "@/lib/speaker-lock";
-import { streamToSpeakers, TalkbackError } from "@/lib/protect/talkback";
+import { streamToSpeakers, TalkbackError, type SpeakerShortfall } from "@/lib/protect/talkback";
 import { coerceTone } from "@/lib/protect/tones";
 import { audioPath } from "@/lib/audio";
 
@@ -167,20 +167,28 @@ async function performDelivery(adapter: ProtectAdapter, run: RunRow): Promise<Ex
     let lastErr: unknown;
     for (let attempt = 1; attempt <= TALKBACK_ATTEMPTS; attempt++) {
       try {
-        const sentPerSpeaker = await streamToSpeakers(
-          ids,
-          files ? { files } : { file: run.audioPath! },
-        );
-        const total = sentPerSpeaker.reduce((a, b) => a + b, 0);
+        const r = await streamToSpeakers(ids, files ? { files } : { file: run.audioPath! });
+        const total = r.sent.reduce((a, b) => a + b, 0);
         if (total === 0) return { status: "FAILED", message: "no audio frames transmitted" };
+        const retried = attempt > 1 ? ` — after ${attempt - 1} retry` : "";
+        // Some rooms heard it and some did not. Not a failure — retrying would
+        // ring it twice where it did play — but never a plain success either:
+        // that is how two offline speakers went unnoticed for five days.
+        if (r.missed.length > 0) {
+          return {
+            status: "PARTIAL",
+            latencyMs: performance.now() - t0,
+            message:
+              `${describeShortfall(r.missed, ids.length)} — streamed ${r.sent.join("/")} of ${r.frames} frames` +
+              retried,
+          };
+        }
         // Talkback is write-only: Protect acknowledges nothing, so a completed
         // transmission is the strongest claim we can honestly make.
         return {
           status: "SUCCESS",
           latencyMs: performance.now() - t0,
-          message:
-            `streamed ${sentPerSpeaker.join("/")} frames (no delivery confirmation available)` +
-            (attempt > 1 ? ` — after ${attempt - 1} retry` : ""),
+          message: `streamed ${r.sent.join("/")} frames (no delivery confirmation available)` + retried,
         };
       } catch (err) {
         lastErr = err;
@@ -253,6 +261,36 @@ export function audioPathForCue(audioFileId: number | null | undefined): string 
     .where(eq(schema.audioFiles.id, audioFileId))
     .get();
   return f ? audioPath(f.storedName) : undefined;
+}
+
+/** Audio went out to at least one speaker: the run happened, if not everywhere. */
+export function wasPlayed(status: RunStatus): boolean {
+  return status === "SUCCESS" || status === "PARTIAL";
+}
+
+/**
+ * Names the speakers a stream fell short on, for the Activity log — e.g.
+ * "2 of 4 speakers missed it: Basement Gym (Protect reports it disconnected),
+ * …". Names rather than frame counts: whoever reads this needs to know which
+ * rooms to check.
+ */
+export function describeShortfall(missed: SpeakerShortfall[], targeted: number): string {
+  const rows = db
+    .select({ id: schema.speakers.id, name: schema.speakers.name, mac: schema.speakers.mac, state: schema.speakers.state })
+    .from(schema.speakers)
+    .where(inArray(schema.speakers.id, missed.map((m) => m.speakerId)))
+    .all();
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const parts = missed.map((m) => {
+    const sp = byId.get(m.speakerId);
+    const why = m.partial
+      ? "cut off partway"
+      : sp?.state && sp.state !== "CONNECTED"
+        ? `Protect reports it ${sp.state.toLowerCase()}`
+        : (m.error ?? "nothing sent");
+    return `${sp?.name ?? sp?.mac ?? m.speakerId} (${why})`;
+  });
+  return `${missed.length} of ${targeted} speakers missed it: ${parts.join(", ")}`;
 }
 
 /** Talkback addresses speakers by Protect id; zones store MACs. */
@@ -338,8 +376,9 @@ export async function executeClaimedRun(adapter: ProtectAdapter, runId: number):
     } catch (err) {
       outcome = { status: "FAILED", message: errorDetail(err) };
     }
-    // A failure means nothing is playing; free the speaker immediately.
-    if (outcome.status !== "SUCCESS") releaseSpeaker();
+    // A failure means nothing is playing; free the speaker immediately. A
+    // partial delivery did play, so it keeps the recovery window like a success.
+    if (!wasPlayed(outcome.status)) releaseSpeaker();
   }
 
   db.update(schema.scheduledRuns)
