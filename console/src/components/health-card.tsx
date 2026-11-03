@@ -5,6 +5,8 @@ import { AlertTriangle, CheckCircle2, CloudCog, KeyRound, Speaker as SpeakerIcon
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { swrFetcher, timeAgo } from "@/lib/format";
+import { speakerHealth } from "@/lib/speaker-health";
+import { cn } from "@/lib/utils";
 
 interface StatusPayload {
   now: number;
@@ -31,7 +33,17 @@ export function HealthCard() {
   if (!data) return null;
 
   const { health, speakers, tts, apiKey } = data;
-  const consoleOk = !health.degraded && health.lastOkAt !== null;
+  const verdict = speakerHealth({
+    reachable: !health.degraded && health.lastOkAt !== null,
+    online: speakers.online,
+    total: speakers.total,
+  });
+  const toneText = {
+    ok: "text-success",
+    warning: "text-warning-strong",
+    critical: "text-destructive",
+  }[verdict.tone];
+  const one = speakers.offline.length === 1;
 
   return (
     <div className="space-y-4">
@@ -57,19 +69,28 @@ export function HealthCard() {
           </AlertDescription>
         </Alert>
       ) : null}
-      {/* While the whole system is unreachable every speaker reads as offline;
-          the alert above already says so. */}
-      {!health.degraded && speakers.offline.length > 0 ? (
-        <Alert>
+      {/* The one place offline speakers are explained in full; everything else
+          on the page shows a count. Amber while some rooms still hear bells,
+          red once none do. An unreachable system is the alert above's to say. */}
+      {verdict.state === "degraded" || verdict.state === "offline" ? (
+        <Alert
+          variant={verdict.state === "offline" ? "destructive" : "default"}
+          className={cn(verdict.state === "degraded" && "border-warning/50 bg-warning/10 *:[svg]:text-warning-strong")}
+        >
           <SpeakerIcon />
-          <AlertTitle>
-            {speakers.offline.length === 1
-              ? `${speakers.offline[0].name} is offline`
-              : `${speakers.offline.length} speakers are offline`}
+          <AlertTitle className={cn(verdict.state === "degraded" && "text-warning-strong")}>
+            {verdict.state === "offline"
+              ? one
+                ? `${speakers.offline[0].name} is offline`
+                : `All ${speakers.total} speakers are offline`
+              : one
+                ? `${speakers.offline[0].name} is offline`
+                : `${speakers.offline.length} of ${speakers.total} speakers are offline`}
           </AlertTitle>
-          <AlertDescription>
-            Bells and announcements will not be heard where{" "}
-            {speakers.offline.length === 1 ? "it is" : "they are"}:{" "}
+          <AlertDescription className={cn(verdict.state === "degraded" && "text-foreground/80")}>
+            {verdict.state === "offline"
+              ? "Bells and announcements will not be heard anywhere: "
+              : `Bells and announcements will not be heard where ${one ? "it is" : "they are"}: `}
             {speakers.offline
               .map((s) =>
                 s.lastSeenOnlineAt === null
@@ -77,8 +98,8 @@ export function HealthCard() {
                   : `${s.name} (last online ${timeAgo(s.lastSeenOnlineAt, data.now)})`,
               )
               .join(", ")}
-            . Check that {speakers.offline.length === 1 ? "it has" : "they have"} power and a network
-            connection, then look at {speakers.offline.length === 1 ? "it" : "them"} in UniFi Protect.
+            . Check that {one ? "it has" : "they have"} power and a network connection, then look
+            at {one ? "it" : "them"} in UniFi Protect.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -107,34 +128,27 @@ export function HealthCard() {
         </Alert>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {/* The NVR and the speakers behind it, as one verdict: the worst of the
+            two. "Working" beside "2 of 4 online" was a contradiction. */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              <CheckCircle2 className={`size-4 ${consoleOk ? "text-success" : "text-destructive"}`} />
-              Speaker system
+              {verdict.tone === "ok" ? (
+                <CheckCircle2 className={cn("size-4", toneText)} />
+              ) : (
+                <AlertTriangle className={cn("size-4", toneText)} />
+              )}
+              Speakers
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-lg font-semibold">{consoleOk ? "Working" : "Not responding"}</p>
-            <p className="text-xs text-muted-foreground">checked {timeAgo(health.lastOkAt, data.now)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-              <SpeakerIcon className="size-4" />
-              Speakers online
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-lg font-semibold">
-              {speakers.online} of {speakers.total}
-            </p>
+            <p className={cn("text-lg font-semibold", verdict.tone !== "ok" && toneText)}>{verdict.label}</p>
             <p className="text-xs text-muted-foreground">
-              {speakers.offline.length === 0
-                ? "all speakers responding"
-                : `offline: ${speakers.offline.map((s) => s.name).join(", ")}`}
+              <span className={cn(speakers.online < speakers.total && cn("font-medium", toneText))}>
+                {speakers.online} of {speakers.total} online
+              </span>{" "}
+              · checked {timeAgo(health.lastOkAt, data.now)}
             </p>
           </CardContent>
         </Card>

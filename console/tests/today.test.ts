@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { DateTime } from "luxon";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
 import { materialize } from "@/lib/scheduler/materializer";
 import { getTodaySchedule } from "@/lib/today";
@@ -74,23 +74,41 @@ describe("today schedule", () => {
     expect(today.readiness.detail).toContain("automatic bell scheduler");
   });
 
-  it("names offline speakers rather than just counting them", () => {
+  it("leaves some speakers being offline to the dashboard banner", () => {
     seedReadyDay();
     seedSpeaker("BB2222222222", "Basement Gym");
     seedSpeaker("CC3333333333", "Basement Lab");
     db.update(schema.speakers)
       .set({ state: "DISCONNECTED" })
-      .where(eq(schema.speakers.name, "Basement Gym"))
-      .run();
-    db.update(schema.speakers)
-      .set({ state: "DISCONNECTED" })
-      .where(eq(schema.speakers.name, "Basement Lab"))
+      .where(inArray(schema.speakers.name, ["Basement Gym", "Basement Lab"]))
       .run();
 
     const today = getTodaySchedule(NOW.toMillis());
 
+    // Bells still ring in the rooms that can hear them; the banner explains
+    // the rest once, in full. Readiness repeating it was the fifth copy.
+    expect(today.readiness.tone).toBe("ready");
+    expect(today.readiness.title).toBe("Today is ready");
+    expect(today.readiness.detail).not.toMatch(/offline|Basement/);
+  });
+
+  it("still flags a day on which no speaker is online at all", () => {
+    seedReadyDay();
+    seedSpeaker("BB2222222222", "Basement Gym");
+    db.update(schema.speakers).set({ state: "DISCONNECTED" }).run();
+
+    const today = getTodaySchedule(NOW.toMillis());
+
     expect(today.readiness.tone).toBe("attention");
-    expect(today.readiness.detail).toBe("2 speakers are offline: Basement Gym, Basement Lab.");
+    expect(today.readiness.title).toBe("Scheduled bells need support");
+    expect(today.readiness.detail).toBe("All 2 speakers are offline, so no bell will be heard.");
+  });
+
+  it("keeps the other readiness issues it had before", () => {
+    seedReadyDay();
+    db.delete(schema.speakers).run();
+
+    expect(getTodaySchedule(NOW.toMillis()).readiness.detail).toBe("No speakers have been discovered.");
   });
 
   it("keeps a skipped bell skipped across schedule regeneration", () => {
