@@ -4,8 +4,8 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 // tests exercise the alert loop's own logic.
 vi.mock("@/lib/protect/talkback", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/protect/talkback")>()),
-  streamToSpeakers: vi.fn(async () => [120]),
-  streamLoopToSpeakers: vi.fn(async () => ({ cycles: 4, frames: 400, reconnects: 0, ended: "until" as const })),
+  streamToSpeakers: vi.fn(async (ids: string[]) => ({ frames: 120, sent: ids.map(() => 120), missed: [] })),
+  streamLoopToSpeakers: vi.fn(async () => ({ cycles: 4, frames: 400, reconnects: 0, ended: "until" as const, missed: [] })),
 }));
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
@@ -265,7 +265,7 @@ describe("a recorded alert streams continuously", () => {
   it("plays as ONE looped session with the repeat gap rendered in-stream", async () => {
     const mock = await loopMock();
     mock.mockClear();
-    mock.mockImplementation(async () => ({ cycles: 7, frames: 700, reconnects: 1, ended: "until" as const }));
+    mock.mockImplementation(async () => ({ cycles: 7, frames: 700, reconnects: 1, ended: "until" as const, missed: [] }));
 
     const rec = seedRecordedAlertCue("Siren");
     startAlert({ cueId: rec, userId, repeatSeconds: 30, maxMinutes: 5 });
@@ -314,7 +314,7 @@ describe("a recorded alert streams continuously", () => {
     // actually silence the speaker instead of letting 20s of audio finish.
     expect(captured!.shouldStop()).toBe(true);
 
-    finish({ cycles: 2, frames: 200, reconnects: 0, ended: "stopped" });
+    finish({ cycles: 2, frames: 200, reconnects: 0, ended: "stopped", missed: [] });
     await alertStreamSettled();
   });
 
@@ -325,7 +325,7 @@ describe("a recorded alert streams continuously", () => {
       .mockImplementationOnce(async () => {
         throw new Error("socket kept dying");
       })
-      .mockImplementation(async () => ({ cycles: 1, frames: 100, reconnects: 0, ended: "until" as const }));
+      .mockImplementation(async () => ({ cycles: 1, frames: 100, reconnects: 0, ended: "until" as const, missed: [] }));
 
     const rec = seedRecordedAlertCue("Siren 3");
     startAlert({ cueId: rec, userId, maxMinutes: 5 });
@@ -342,6 +342,33 @@ describe("a recorded alert streams continuously", () => {
     await alertStreamSettled();
     expect(db.select().from(schema.scheduledRuns).all().at(-1)!.status).toBe("SUCCESS");
     stopAlert(userId);
+  });
+
+  it("names the speakers a running alert never reached, and keeps sounding", async () => {
+    seedSpeaker("CCC000", "Basement Lab");
+    db.update(schema.speakers).set({ state: "DISCONNECTED" }).where(eq(schema.speakers.mac, "CCC000")).run();
+    const mock = await loopMock();
+    mock.mockClear();
+    mock.mockImplementationOnce(async () => ({
+      cycles: 6,
+      frames: 600,
+      reconnects: 0,
+      ended: "stopped" as const,
+      missed: [{ speakerId: "spk-CCC000", partial: false, error: "talkback WS rejected: HTTP 500" }],
+    }));
+
+    const rec = seedRecordedAlertCue("Siren partial");
+    startAlert({ cueId: rec, userId, maxMinutes: 5 });
+    expect(await tickAlert(fakeAdapter())).toBe("played");
+    await alertStreamSettled();
+
+    const run = db.select().from(schema.scheduledRuns).all().at(-1)!;
+    expect(run.status).toBe("PARTIAL");
+    expect(run.resultMessage).toMatch(/^1 of 2 speakers missed it: Basement Lab \(Protect reports it disconnected\) — sounded 6×/);
+    // A partial delivery never stops an emergency.
+    expect(readAlertState().active).toBe(true);
+    stopAlert(userId);
+    db.delete(schema.speakers).where(eq(schema.speakers.mac, "CCC000")).run();
   });
 
   it("webhook alerts keep the per-repetition path", async () => {

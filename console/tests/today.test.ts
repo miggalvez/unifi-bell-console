@@ -74,6 +74,25 @@ describe("today schedule", () => {
     expect(today.readiness.detail).toContain("automatic bell scheduler");
   });
 
+  it("names offline speakers rather than just counting them", () => {
+    seedReadyDay();
+    seedSpeaker("BB2222222222", "Basement Gym");
+    seedSpeaker("CC3333333333", "Basement Lab");
+    db.update(schema.speakers)
+      .set({ state: "DISCONNECTED" })
+      .where(eq(schema.speakers.name, "Basement Gym"))
+      .run();
+    db.update(schema.speakers)
+      .set({ state: "DISCONNECTED" })
+      .where(eq(schema.speakers.name, "Basement Lab"))
+      .run();
+
+    const today = getTodaySchedule(NOW.toMillis());
+
+    expect(today.readiness.tone).toBe("attention");
+    expect(today.readiness.detail).toBe("2 speakers are offline: Basement Gym, Basement Lab.");
+  });
+
   it("keeps a skipped bell skipped across schedule regeneration", () => {
     const { firstEventId } = seedReadyDay();
     db.insert(schema.bellEventOverrides)

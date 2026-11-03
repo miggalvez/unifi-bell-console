@@ -71,8 +71,33 @@ export interface StreamOptions {
   ffmpegPath?: string;
 }
 
-/** Streams to every speaker at once, one socket each. Returns frames per speaker. */
-export async function streamToSpeakers(speakerIds: string[], opts: StreamOptions): Promise<number[]> {
+/**
+ * A speaker that did not get the whole stream. One speaker failing never sinks
+ * the others, so without this a run that reached half the building looks
+ * exactly like one that reached all of it.
+ */
+export interface SpeakerShortfall {
+  speakerId: string;
+  /** True when some audio reached it before its stream stopped. */
+  partial: boolean;
+  /** The failure, when there was one; a socket that just closed early has none. */
+  error?: string;
+}
+
+export interface FanOutResult {
+  /** Frames in the encoded audio — what a complete delivery sends each speaker. */
+  frames: number;
+  /** Frames actually sent, per speaker, in the order the ids were given. */
+  sent: number[];
+  /** Speakers that got less than all of it. Empty when every speaker got everything. */
+  missed: SpeakerShortfall[];
+}
+
+/**
+ * Streams to every speaker at once, one socket each. Throws only when no
+ * speaker got anything; otherwise the shortfalls are in `missed`.
+ */
+export async function streamToSpeakers(speakerIds: string[], opts: StreamOptions): Promise<FanOutResult> {
   const session = getPrivateSession();
   let frames: Buffer[];
   try {
@@ -95,7 +120,17 @@ export async function streamToSpeakers(speakerIds: string[], opts: StreamOptions
       { cause, retryable: cause instanceof TalkbackError ? cause.retryable : false },
     );
   }
-  return sent;
+  const missed: SpeakerShortfall[] = [];
+  results.forEach((r, i) => {
+    if (r.status === "fulfilled" && r.value >= frames.length) return;
+    const err = r.status === "rejected" ? (r.reason as Error) : undefined;
+    missed.push({
+      speakerId: speakerIds[i],
+      partial: err instanceof TalkbackError ? err.transmitted : sent[i] > 0,
+      error: err?.message,
+    });
+  });
+  return { frames: frames.length, sent, missed };
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -293,6 +328,8 @@ export interface LoopResult {
   frames: number;
   reconnects: number;
   ended: "until" | "stopped";
+  /** Speakers whose loop gave up while others kept sounding. */
+  missed: SpeakerShortfall[];
 }
 
 /** A connection that dies this many times without completing a cycle is dead. */
@@ -333,8 +370,18 @@ export async function streamLoopToSpeakers(speakerIds: string[], opts: LoopOptio
       { cause, retryable: cause instanceof TalkbackError ? cause.retryable : false },
     );
   }
+  const missed: SpeakerShortfall[] = [];
+  results.forEach((r, i) => {
+    if (r.status === "fulfilled") return;
+    const err = r.reason as Error;
+    missed.push({
+      speakerId: speakerIds[i],
+      partial: err instanceof TalkbackError ? err.transmitted : false,
+      error: err?.message,
+    });
+  });
   const best = ok.map((r) => r.value).sort((a, b) => b.frames - a.frames)[0];
-  return { ...best, reconnects: ok.reduce((a, r) => a + r.value.reconnects, 0) };
+  return { ...best, reconnects: ok.reduce((a, r) => a + r.value.reconnects, 0), missed };
 }
 
 async function loopOneSpeaker(
@@ -448,5 +495,5 @@ async function loopOneSpeaker(
   // Zero cycles with a clean exit means the deadline or an abort arrived
   // before anything went out — a caller decision, not an error. Refusals and
   // dead sockets already threw above via the consecutive-failure cap.
-  return { cycles, frames, reconnects, ended };
+  return { cycles, frames, reconnects, ended, missed: [] };
 }

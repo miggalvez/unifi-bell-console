@@ -47,6 +47,7 @@ const STATUS: Record<
   CLAIMED: { label: "Starting", className: "bg-primary/10 text-primary" },
   EXECUTING: { label: "Playing", className: "bg-primary/10 text-primary" },
   SUCCESS: { label: "Played", className: "bg-success/10 text-success" },
+  PARTIAL: { label: "Some speakers missed it", className: "bg-warning/10 text-warning" },
   FAILED: { label: "Did not play", className: "bg-destructive/10 text-destructive" },
   MISSED: { label: "Missed", className: "bg-warning/10 text-warning" },
   DELIVERY_UNCERTAIN: { label: "Not confirmed", className: "bg-warning/10 text-warning" },

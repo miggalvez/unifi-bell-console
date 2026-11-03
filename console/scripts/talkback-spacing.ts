@@ -38,7 +38,7 @@ interface Trial {
 
 async function burst(ids: string[], beeps: number): Promise<{ ok: boolean; note: string }> {
   try {
-    const sent = await streamToSpeakers(ids, { beeps });
+    const { sent } = await streamToSpeakers(ids, { beeps });
     return { ok: true, note: `${sent.join("/")} frames` };
   } catch (err) {
     const refused = err instanceof TalkbackError && !err.transmitted;

@@ -35,7 +35,13 @@ import {
   releaseSpeaker,
 } from "@/lib/speaker-lock";
 import { TalkbackError, streamLoopToSpeakers } from "@/lib/protect/talkback";
-import { executeClaimedRun, audioPathForCue, audioPathsForCue } from "@/lib/scheduler/executor";
+import {
+  executeClaimedRun,
+  audioPathForCue,
+  audioPathsForCue,
+  describeShortfall,
+  wasPlayed,
+} from "@/lib/scheduler/executor";
 import { isTalkback } from "@/lib/delivery";
 import { localDateTimeParts } from "@/lib/scheduler/time";
 import { resolveTargetMacs } from "@/lib/zones";
@@ -488,7 +494,7 @@ function startPhaseStream(
     const st = getSystemState();
     return st.drillSequenceId === sequenceId && st.drillStepEndsAt === endsAt;
   };
-  const finishRun = (status: "SUCCESS" | "FAILED", message: string) =>
+  const finishRun = (status: "SUCCESS" | "PARTIAL" | "FAILED", message: string) =>
     db.update(schema.scheduledRuns)
       .set({ status, executedAt: Date.now(), resultMessage: message })
       .where(eq(schema.scheduledRuns.id, run.id))
@@ -513,9 +519,12 @@ function startPhaseStream(
     if (r.cycles === 0 && r.ended === "until") {
       throw new TalkbackError("the stream ended before the announcement could play", false);
     }
+    // Speakers that dropped out are named, but the drill carries on: the rest
+    // of the building is still hearing a correctly tagged drill.
     finishRun(
-      "SUCCESS",
-      `sounded ${r.cycles}× as one continuous stream` +
+      r.missed.length > 0 ? "PARTIAL" : "SUCCESS",
+      (r.missed.length > 0 ? `${describeShortfall(r.missed, ids.length)} — ` : "") +
+        `sounded ${r.cycles}× as one continuous stream` +
         (r.reconnects > 0 ? ` (${r.reconnects} reconnect${r.reconnects > 1 ? "s" : ""})` : "") +
         (r.ended === "stopped" ? " — stopped" : ""),
     );
@@ -642,7 +651,9 @@ export async function tickDrill(adapter: ProtectAdapter, now = Date.now()): Prom
 
   async function speakTag(): Promise<boolean> {
     const outcome = await playCue(adapter, preamble!, now, s.drillStartedBy, "drill announcement");
-    if (outcome.status === "SUCCESS") {
+    // A tag that missed some speakers still tagged the rooms the sound will
+    // reach — an offline speaker misses both alike — so the drill goes on.
+    if (wasPlayed(outcome.status)) {
       retimeFromCompletion(preamble!);
       return true;
     }
@@ -718,8 +729,8 @@ export async function tickDrill(adapter: ProtectAdapter, now = Date.now()): Prom
 
     const outcome = await executeClaimedRun(adapter, inserted.id);
     // The announcement is inside this stream, so a failure means it did not
-    // play — the same rule applies as for a standalone tag.
-    if (outcome.status !== "SUCCESS") {
+    // play — the same rule applies as for a standalone tag, partial included.
+    if (!wasPlayed(outcome.status)) {
       stopDrill(
         null,
         `the drill announcement did not play (${outcome.message ?? outcome.status}) — drill abandoned rather than sounding an emergency tone without it`,

@@ -15,7 +15,7 @@ import { writeAudit } from "@/lib/audit";
 import { TALKBACK_RECOVERY_MS, estimateDurationMs, forceClaimSpeaker, releaseSpeaker } from "@/lib/speaker-lock";
 import { streamLoopToSpeakers } from "@/lib/protect/talkback";
 import { isTalkback } from "@/lib/delivery";
-import { executeClaimedRun, audioPathForCue, audioPathsForCue } from "@/lib/scheduler/executor";
+import { executeClaimedRun, audioPathForCue, audioPathsForCue, describeShortfall } from "@/lib/scheduler/executor";
 import { localDateTimeParts } from "@/lib/scheduler/time";
 import { resolveTargetMacs } from "@/lib/zones";
 import { inArray } from "drizzle-orm";
@@ -219,7 +219,7 @@ function startAlertStream(cue: typeof schema.soundCues.$inferSelect, state: Syst
     const st = getSystemState();
     return st.alertCueId === cueId && st.alertStartedAt === startedAt;
   };
-  const finishRun = (status: "SUCCESS" | "FAILED", message: string) =>
+  const finishRun = (status: "SUCCESS" | "PARTIAL" | "FAILED", message: string) =>
     db.update(schema.scheduledRuns)
       .set({ status, executedAt: Date.now(), resultMessage: message })
       .where(eq(schema.scheduledRuns.id, run.id))
@@ -235,9 +235,12 @@ function startAlertStream(cue: typeof schema.soundCues.$inferSelect, state: Syst
       until,
       shouldStop: () => !stillThisAlert(),
     });
+    // An alert that reached only some rooms names the rest, so someone can go
+    // and tell them in person.
     finishRun(
-      "SUCCESS",
-      `sounded ${r.cycles}× as one continuous stream` +
+      r.missed.length > 0 ? "PARTIAL" : "SUCCESS",
+      (r.missed.length > 0 ? `${describeShortfall(r.missed, ids.length)} — ` : "") +
+        `sounded ${r.cycles}× as one continuous stream` +
         (r.reconnects > 0 ? ` (${r.reconnects} reconnect${r.reconnects > 1 ? "s" : ""})` : "") +
         (r.ended === "stopped" ? " — stopped" : ""),
     );
