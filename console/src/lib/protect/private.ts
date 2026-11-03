@@ -163,13 +163,33 @@ export class PrivateSession {
   }
 
   /**
-   * Speak text on the speakers identified by MAC, via the Test-Alarm dry run.
+   * Speak text on the speakers identified by MAC, via a Test-Alarm dry run.
    * 'combined' (all MACs in one action) is the phase0-proven mode.
+   *
+   * Protect 7.3 refuses the legacy dry run outright once the UniFi OS v2
+   * Alarm Manager is on (observed 7.3.70, 2026-11-02), so the first such
+   * refusal moves this session to the v2 dry run for good. Consoles that never
+   * send it stay on the legacy path they were validated on.
    */
   async speak(
     text: string,
     macs: string[],
     tone = "welcome",
+  ): Promise<{ status: number; ms: number; detail?: string }> {
+    if (!this.legacyTtsRefused) {
+      const r = await this.speakLegacy(text, macs, tone);
+      if (r.status !== 400 || !/global alarm manager is enabled/i.test(r.detail ?? "")) return r;
+      this.legacyTtsRefused = true;
+    }
+    return this.speakV2(text, macs, tone);
+  }
+
+  private legacyTtsRefused = false;
+
+  private async speakLegacy(
+    text: string,
+    macs: string[],
+    tone: string,
   ): Promise<{ status: number; ms: number; detail?: string }> {
     const body = {
       name: "_bell_console",
@@ -197,6 +217,36 @@ export class PrivateSession {
     // was the problem.
     const detail = res.status === 200 ? "" : (await res.text().catch(() => "")).slice(0, 300);
     return { status: res.status, ms, detail };
+  }
+
+  /**
+   * The v2 Alarm Manager's own "Test Alarm" (POST …/test, 204 on success):
+   * same body as createAlarm, but it runs the actions once and saves nothing.
+   * The webhook trigger is a placeholder the validator insists on. `tone` is
+   * not in customMessage's schema, which allows extra fields — it is passed
+   * through in case the speaker honours it, as the legacy action did.
+   */
+  private async speakV2(
+    text: string,
+    macs: string[],
+    tone: string,
+  ): Promise<{ status: number; ms: number; detail?: string }> {
+    const body = {
+      title: "_bell_console",
+      triggers_data: [
+        [{ id: "protect:webhook.webhook", precondition_config: null, data: { webhook: randomUUID() } }],
+      ],
+      actions_data: [
+        [{ id: "protect:sound.customMessage", target_ids: [], data: { sources: macs, text, tone } }],
+      ],
+      scope: null,
+      suppression: null,
+      restriction: null,
+    };
+    const { res, ms } = await this.request("POST", "/api/v2/alarms/protect/test", body);
+    const ok = res.status >= 200 && res.status < 300;
+    const detail = (await res.text().catch(() => "")).slice(0, 300);
+    return { status: res.status, ms, detail: ok ? "" : detail };
   }
 
   // ---------------------------------------------------------------------------

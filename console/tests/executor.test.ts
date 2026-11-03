@@ -175,6 +175,18 @@ describe("Protect's 120-character TTS limit", () => {
     expect(outcome.message).not.toMatch(/voice/);
   });
 
+  it("treats the v2 Alarm Manager's 204 as a played announcement", async () => {
+    const id = insertClaimedRun({
+      deliveryMethod: "PROTECT_NATIVE_TTS",
+      webhookId: null,
+      ttsText: "Announcement check",
+    });
+    const adapter = fakeAdapter({ speak: vi.fn().mockResolvedValue({ status: 204, ms: 650, detail: "" }) });
+    const outcome = await executeClaimedRun(adapter, id);
+    expect(outcome.status).toBe("SUCCESS");
+    expect(runRow(id).httpStatus).toBe(204);
+  });
+
   it("still points at the voice for other 400s", async () => {
     const id = insertClaimedRun({
       deliveryMethod: "PROTECT_NATIVE_TTS",

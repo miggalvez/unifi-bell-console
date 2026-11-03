@@ -207,7 +207,8 @@ async function performDelivery(adapter: ProtectAdapter, run: RunRow): Promise<Ex
   if (!r.ok) {
     return { status: r.uncertain ? "DELIVERY_UNCERTAIN" : "FAILED", message: r.message };
   }
-  if (r.status === 200) return { status: "SUCCESS", httpStatus: r.status, latencyMs: r.ms };
+  // 200 from the legacy dry run, 204 from the v2 Alarm Manager's.
+  if (r.status === 200 || r.status === 204) return { status: "SUCCESS", httpStatus: r.status, latencyMs: r.ms };
   return {
     status: "FAILED",
     httpStatus: r.status,
