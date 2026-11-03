@@ -237,7 +237,9 @@ export class PrivateSession {
         [{ id: "protect:webhook.webhook", precondition_config: null, data: { webhook: randomUUID() } }],
       ],
       actions_data: [
-        [{ id: "protect:sound.customMessage", target_ids: [], data: { sources: macs, text, tone } }],
+        // Sound actions select speakers through data.sources. An explicit
+        // empty target_ids suppresses playback while still returning 204.
+        [{ id: "protect:sound.customMessage", data: { sources: macs, text, tone } }],
       ],
       scope: null,
       suppression: null,

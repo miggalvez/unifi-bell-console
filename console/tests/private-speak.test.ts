@@ -61,6 +61,9 @@ describe("PrivateSession.speak", () => {
       id: "protect:sound.customMessage",
       data: { sources: ["AA11BB22CC33", "DD44EE55FF66"], text: "Announcement check", tone: "neutral" },
     });
+    // An explicit empty target_ids list suppresses the sound action even
+    // though data.sources names the intended speakers. Do not serialize it.
+    expect(body.actions_data[0][0]).not.toHaveProperty("target_ids");
 
     await session.speak("Second", ["AA11BB22CC33"]);
     expect(calls.map((c) => c.path)).toEqual([LEGACY, V2, V2]);
