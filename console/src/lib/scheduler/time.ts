@@ -12,11 +12,17 @@ export function localDateTimeParts(now = nowLocal()): { localDate: string; local
 
 /**
  * Convert a school-local date + 'HH:MM' to a UTC epoch, DST-correct per date.
- * Luxon maps nonexistent times (spring-forward gap) forward and resolves
- * ambiguous times (fall-back) to the first occurrence — pinned by tests.
+ * Nonexistent times (spring-forward gap) map forward; ambiguous times
+ * (fall-back) resolve to the first occurrence — both pinned by tests.
+ *
+ * The first occurrence must be chosen explicitly: on its own, Luxon resolves
+ * an ambiguous time with the zone's offset at the moment the process first
+ * parsed a date (cached for the process lifetime), so the answer flipped with
+ * the season the web/worker process happened to start in.
  */
 export function localToUtcEpoch(localDate: string, localTime: string): number {
-  return DateTime.fromISO(`${localDate}T${localTime}`, { zone: env.schoolTz }).toMillis();
+  const dt = DateTime.fromISO(`${localDate}T${localTime}`, { zone: env.schoolTz });
+  return Math.min(...dt.getPossibleOffsets().map((d) => d.toMillis()));
 }
 
 export function addDaysLocal(localDate: string, days: number): string {
