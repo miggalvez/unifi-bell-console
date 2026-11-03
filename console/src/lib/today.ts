@@ -176,15 +176,18 @@ export function getTodaySchedule(now = Date.now()): TodayScheduleSnapshot {
   if (state.consecutiveHealthFailures >= 3 || !healthFresh) {
     issues.push("The speaker system has not passed a recent connection check.");
   }
-  const speakers = db
-    .select({ state: schema.speakers.state, name: schema.speakers.name, mac: schema.speakers.mac })
-    .from(schema.speakers)
-    .all();
-  // Named, not counted: "2 speakers are offline" sat unread for five days.
-  const offline = speakers.filter((speaker) => speaker.state !== "CONNECTED").map((s) => s.name ?? s.mac);
+  const speakers = db.select({ state: schema.speakers.state }).from(schema.speakers).all();
+  const online = speakers.filter((speaker) => speaker.state === "CONNECTED").length;
   if (speakers.length === 0) issues.push("No speakers have been discovered.");
-  else if (offline.length > 0) {
-    issues.push(`${offline.length} speaker${offline.length === 1 ? " is" : "s are"} offline: ${offline.join(", ")}.`);
+  // Some speakers offline is the dashboard banner's to explain — repeating it
+  // here said the same thing five times over. None online is different: no
+  // bell today can be heard at all, which is exactly what readiness is for.
+  else if (online === 0) {
+    issues.push(
+      speakers.length === 1
+        ? "The speaker is offline, so no bell will be heard."
+        : `All ${speakers.length} speakers are offline, so no bell will be heard.`,
+    );
   }
   if (state.lastMaterializedThrough === null || state.lastMaterializedThrough < localDate) {
     issues.push("Today's bell schedule has not been prepared.");

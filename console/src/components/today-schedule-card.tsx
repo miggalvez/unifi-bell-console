@@ -10,6 +10,7 @@ import {
   Loader2,
   RotateCcw,
   SkipForward,
+  Speaker as SpeakerIcon,
   TriangleAlert,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +27,7 @@ import {
 import { Field, SelectField } from "@/components/fields";
 import { cn } from "@/lib/utils";
 import { friendlyCountdown, friendlyTime, swrFetcher } from "@/lib/format";
+import { speakerHealth } from "@/lib/speaker-health";
 import type { TodayScheduleSnapshot, TodayTimelineItem } from "@/lib/today";
 import {
   changeNextBell,
@@ -37,6 +39,8 @@ interface StatusPayload {
   now: number;
   schoolTz: string;
   today: TodayScheduleSnapshot;
+  health: { degraded: boolean; lastOkAt: number | null };
+  speakers: { online: number; total: number };
 }
 
 const STATUS: Record<
@@ -275,9 +279,22 @@ export function TodayScheduleCard({ isAdmin }: { isAdmin: boolean }) {
   const ready = today.readiness.tone === "ready";
   const attention = today.readiness.tone === "attention";
   const next = today.next;
+  // Some speakers offline: a count here, the full story in the banner above.
+  // (None online is a readiness issue in its own right, so it needs no tag.)
+  const degraded =
+    speakerHealth({
+      reachable: !data.health.degraded && data.health.lastOkAt !== null,
+      online: data.speakers.online,
+      total: data.speakers.total,
+    }).state === "degraded";
 
   return (
-    <Card className={cn(attention && "ring-destructive/40", ready && "ring-success/30")}>
+    <Card
+      className={cn(
+        attention && "ring-destructive/40",
+        ready && (degraded ? "ring-warning/40" : "ring-success/30"),
+      )}
+    >
       <CardHeader className="border-b">
         <CardTitle className="flex items-center gap-2">
           <CalendarCheck2 className="size-4 text-muted-foreground" />
@@ -335,7 +352,15 @@ export function TodayScheduleCard({ isAdmin }: { isAdmin: boolean }) {
                   {today.readiness.detail}
                 </div>
               </div>
-              {today.exception ? <Badge variant="outline">Today’s override</Badge> : null}
+              <div className="flex flex-wrap justify-end gap-1.5">
+                {degraded ? (
+                  <Badge variant="outline" className="border-transparent bg-warning/10 text-warning-strong">
+                    <SpeakerIcon />
+                    Playing on {data.speakers.online} of {data.speakers.total} speakers
+                  </Badge>
+                ) : null}
+                {today.exception ? <Badge variant="outline">Today’s override</Badge> : null}
+              </div>
             </div>
             {today.timeline.length === 0 ? (
               <div className="rounded-lg border border-dashed px-3 py-8 text-center text-sm text-muted-foreground">
