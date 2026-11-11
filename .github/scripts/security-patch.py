@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 
 BOT = "dependabot[bot]"
@@ -162,8 +163,10 @@ def evaluate(n, linked):
         return "review: dependency changes are not all verified stable patches"
     base = api(f"{API}/git/ref/heads/main")["object"]["sha"]
     run = ci_for(n, head, parent, base)
-    if not run or run["conclusion"] != "success":
-        return "waiting for successful tests of this patch on current main"
+    if not run or run["status"] != "completed":
+        return "waiting for current-base CI"
+    if run["conclusion"] != "success":
+        return f"review: current-base CI ended with {run['conclusion']}"
     jobs = api(f"{API}/actions/runs/{run['id']}/attempts/{run['run_attempt']}/jobs?per_page=100")
     required = set(os.environ["REQUIRED_JOBS"].split("|"))
     if (not required <= {j["name"] for j in jobs["jobs"]}
@@ -197,10 +200,21 @@ def main():
     else:
         pages = api(f"{API}/pulls?state=open&base=main&per_page=100", "--paginate", "--slurp")
         numbers = [p["number"] for page in pages for p in page if p["user"]["login"] == BOT]
-    if numbers:
+    # GitHub may suppress a workflow_run notification when the tests were
+    # dispatched with GITHUB_TOKEN. Finish the decision in the requesting job.
+    deadline = time.monotonic() + 20 * 60
+    while numbers:
         linked = linked_prs()
+        waiting = []
         for number in numbers:
-            print(f"#{number}: {evaluate(number, linked)}", flush=True)
+            decision = evaluate(number, linked)
+            print(f"#{number}: {decision}", flush=True)
+            if decision == "waiting for current-base CI":
+                waiting.append(number)
+        if not waiting or time.monotonic() >= deadline:
+            break
+        numbers = waiting
+        time.sleep(30)
 
 
 if __name__ == "__main__":
