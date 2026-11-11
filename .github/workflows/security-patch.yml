@@ -14,17 +14,17 @@ jobs:
     if: >-
       github.ref == 'refs/heads/main' &&
       (github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.event == 'pull_request' &&
+      ((github.event.workflow_run.event == 'pull_request' || github.event.workflow_run.event == 'workflow_dispatch') &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
-      startsWith(github.event.workflow_run.head_branch, 'dependabot/')))
+      (startsWith(github.event.workflow_run.head_branch, 'dependabot/') || github.event.workflow_run.head_branch == 'main')))
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    concurrency: security-patch-${{ github.event.workflow_run.head_branch || 'open-prs' }}
+    concurrency: security-patch-${{ github.event.workflow_run.id || github.run_id }}
     permissions:
-      actions: read
+      actions: write
       contents: write
-      pull-requests: write
+      pull-requests: read
       vulnerability-alerts: read
     steps:
       # Only load code from the trusted workflow revision, never the pull request.

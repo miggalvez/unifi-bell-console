@@ -1,12 +1,27 @@
 name: PR checks
 
-on: pull_request
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch' && format('Patch verification #{0} {1} on {2}', inputs.number, inputs.head, inputs.base) || github.event.pull_request.title }}
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      number:
+        required: true
+        type: string
+      head:
+        required: true
+        type: string
+      base:
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: pr-checks-${{ github.event.pull_request.number }}
+  group: pr-checks-${{ github.event_name }}-${{ github.event.pull_request.number || inputs.number }}
   cancel-in-progress: true
 
 jobs:
@@ -21,13 +36,24 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+          ref: ${{ inputs.base || github.sha }}
+          fetch-depth: ${{ github.event_name == 'workflow_dispatch' && '0' || '1' }}
+      - name: Prepare exact patch against current main
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: .
+        env:
+          PATCH_PR: ${{ inputs.number }}
+          PATCH_HEAD: ${{ inputs.head }}
+          PATCH_BASE: ${{ inputs.base }}
+        run: bash .github/scripts/test-patch-on-base.sh
       # The merge policy checks which base this CI attempt actually tested.
-      - name: Tested base ${{ github.event.pull_request.base.sha }}
+      - name: Tested base ${{ inputs.base || github.event.pull_request.base.sha }}
         run: 'true'
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
-          cache: npm
+          package-manager-cache: false
+          cache: ${{ github.event_name == 'pull_request' && 'npm' || '' }}
           cache-dependency-path: console/package-lock.json
       - name: Install locked dependencies
         run: npm ci
@@ -56,13 +82,24 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+          ref: ${{ inputs.base || github.sha }}
+          fetch-depth: ${{ github.event_name == 'workflow_dispatch' && '0' || '1' }}
+      - name: Prepare exact patch against current main
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: .
+        env:
+          PATCH_PR: ${{ inputs.number }}
+          PATCH_HEAD: ${{ inputs.head }}
+          PATCH_BASE: ${{ inputs.base }}
+        run: bash .github/scripts/test-patch-on-base.sh
       # The merge policy checks which base this CI attempt actually tested.
-      - name: Tested base ${{ github.event.pull_request.base.sha }}
+      - name: Tested base ${{ inputs.base || github.event.pull_request.base.sha }}
         run: 'true'
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
-          cache: npm
+          package-manager-cache: false
+          cache: ${{ github.event_name == 'pull_request' && 'npm' || '' }}
           cache-dependency-path: phase0/package-lock.json
       - name: Install locked dependencies
         run: npm ci

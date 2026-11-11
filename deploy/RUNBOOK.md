@@ -595,7 +595,7 @@ Every PR runs the console tests and production build, the mocked Phase 0 client 
 and the checks for the merge and deployment policy. After CI, GitHub Actions may
 squash-merge a signed Dependabot PR linked to an open security alert if its npm
 manifest and lockfile changes are all verified patch updates. A daily retry checks
-open PRs and asks Dependabot to rebase stale eligible updates. Major, minor and
+open PRs and dispatches read-only tests against the current main commit for eligible stale updates. Major, minor and
 ambiguous changes go through review.
 
 Install the timer from a reviewed release on the school host:
