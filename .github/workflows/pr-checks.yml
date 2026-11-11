@@ -1,0 +1,75 @@
+name: PR checks
+
+on: pull_request
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  console:
+    name: Console scheduler and simulated announcements
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      # The merge policy checks which base this CI attempt actually tested.
+      - name: Tested base ${{ github.event.pull_request.base.sha }}
+        run: 'true'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Install FFmpeg for audio tests
+        run: |
+          # Install the pinned Linux FFmpeg binary used by the audio tests.
+          echo 'imageio-ffmpeg==0.6.0 --hash=sha256:c7e46fcec401dd990405049d2e2f475e2b397779df2519b544b8aab515195282' > "$RUNNER_TEMP/ffmpeg.txt"
+          python3 -m pip install --target "$RUNNER_TEMP/audio-tools" --no-deps --only-binary=:all: --require-hashes -r "$RUNNER_TEMP/ffmpeg.txt"
+          mkdir -p "$RUNNER_TEMP/audio-bin"
+          ln -s "$RUNNER_TEMP"/audio-tools/imageio_ffmpeg/binaries/ffmpeg-linux-x86_64-* "$RUNNER_TEMP/audio-bin/ffmpeg"
+          "$RUNNER_TEMP/audio-bin/ffmpeg" -version
+          echo "$RUNNER_TEMP/audio-bin" >> "$GITHUB_PATH"
+      - name: Run console tests
+        run: npm test
+      - name: Build console
+        run: npm run build
+
+  phase0:
+    name: Phase 0 Protect client
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: phase0
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      # The merge policy checks which base this CI attempt actually tested.
+      - name: Tested base ${{ github.event.pull_request.base.sha }}
+        run: 'true'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: phase0/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Test patch policy, schedule guard and interrupted deployment recovery
+        working-directory: .
+        run: python3 -B -m unittest discover -s deploy/tests
+      - name: Typecheck client
+        run: npm run typecheck
+      - name: Test mocked Protect requests
+        run: npm test

@@ -1,0 +1,40 @@
+name: Merge Dependabot security patches
+on:
+  workflow_run:
+    workflows: ["PR checks"]
+    types: [completed]
+  schedule:
+    - cron: '37 3 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  patch:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency: security-patch-${{ github.event.workflow_run.head_branch || 'open-prs' }}
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: write
+      vulnerability-alerts: read
+    steps:
+      # Only load code from the trusted workflow revision, never the pull request.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - name: Apply patch policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUIRED_JOBS: Console scheduler and simulated announcements|Phase 0 Protect client
+        run: python3 .github/scripts/security-patch.py

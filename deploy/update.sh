@@ -73,6 +73,11 @@ verify() {
   return $ok
 }
 
+# Serialize manual updates and rollbacks with the security-patch timer.
+exec 9>/run/bell-console-update.lock
+flock -n 9 || fail "another update is running"
+[ ! -e /var/lib/bell-security-update/switch.json ] || fail "security deployment recovery is pending"
+
 # -------------------------------------------------------------- rollback ----
 if [ "${1:-}" = "--rollback" ]; then
   [ -f "$LAST_GOOD" ] || { fail "no $LAST_GOOD — nothing recorded to roll back to"; exit 1; }

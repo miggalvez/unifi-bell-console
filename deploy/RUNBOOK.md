@@ -588,3 +588,45 @@ journalctl -u bell-web -n 100
 
 Operating notes, the priority model, and what each delivery method actually
 confirms are in the [console README](../console/README.md).
+
+## Automatic security patches (systemd)
+
+Every PR runs the console tests and production build, the mocked Phase 0 client test,
+and the checks for the merge and deployment policy. After CI, GitHub Actions may
+squash-merge a signed Dependabot PR linked to an open security alert if its npm
+manifest and lockfile changes are all verified patch updates. A daily retry checks
+open PRs and asks Dependabot to rebase stale eligible updates. Major, minor and
+ambiguous changes go through review.
+
+Install the timer from a reviewed release on the school host:
+
+```sh
+sudo install -o root -g root -m 0755 deploy/security-update.py /usr/local/sbin/bell-security-update
+sudo install -o root -g root -m 0644 deploy/systemd/bell-security-update.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now bell-security-update.timer
+```
+
+The host checks GitHub every ten minutes. Each commit since the deployed revision
+must be an Actions-merged Dependabot patch with a matching tested parent. A regular
+merge anywhere in that range needs the usual manual release. The updater keeps the
+running web UI and scheduler available while preparing the new build in a separate
+directory. It checks the live SQLite schedule before building and again immediately
+before switching: the first-to-last bell span and 30 minutes on either side are
+reserved, as are active alerts, drills, playback and imminent pending runs. A stale
+heartbeat or incomplete schedule defers the update. Keep the host's local timezone
+in sync with the school's timezone. This installation uses the default console
+database at `console/data/bell.db`.
+
+After switching, the service checks the served build ID, scheduler heartbeat, a
+fresh Protect health poll, and previously connected speakers. On failure, it restores
+the previous commit and build artifacts, preserving the live database and recordings.
+An interrupted switch is recovered on the next run. A rolled-back SHA is held until a
+new patch supersedes it or an operator investigates and clears
+`/var/lib/bell-security-update/failed-sha`.
+
+```sh
+sudo /usr/local/sbin/bell-security-update --check
+systemctl list-timers bell-security-update.timer
+journalctl -u bell-security-update.service -n 40
+```
