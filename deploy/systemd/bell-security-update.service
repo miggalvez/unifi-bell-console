@@ -1,0 +1,11 @@
+[Unit]
+Description=Deploy tested bell console security patches outside the school bell schedule
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/bell-security-update
+StateDirectory=bell-security-update
+StateDirectoryMode=0755
+TimeoutStartSec=40min

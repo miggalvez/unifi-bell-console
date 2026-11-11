@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for tested bell console security patches every ten minutes
+
+[Timer]
+OnCalendar=*:0/10
+Persistent=true
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

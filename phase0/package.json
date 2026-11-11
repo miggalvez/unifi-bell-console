@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "phase0": "tsx src/cli.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts"
   },
   "engines": {
     "node": ">=20.11"
