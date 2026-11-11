@@ -97,13 +97,28 @@ def classify(files, parent, head):
     return sorted(set(changes))
 
 
-def refresh_stale(n, head, base):
-    marker = f"<!-- school-patch-rebase {head} {base} -->"
-    comments = api(f"{API}/issues/{n}/comments?per_page=100", "--paginate", "--slurp")
-    if not any(c["user"]["login"] == "github-actions[bot]" and marker in c["body"]
-               for page in comments for c in page):
-        api(f"{API}/issues/{n}/comments", "-X", "POST", "-f", f"body=@dependabot rebase\n\n{marker}")
-    return "waiting for Dependabot to rebase and CI to test current main"
+def ci_for(n, head, parent, base):
+    workflow = f"{API}/actions/workflows/pr-checks.yml"
+    if parent == base:
+        runs = api(f"{workflow}/runs?event=pull_request&head_sha={head}&per_page=1")["workflow_runs"]
+        if runs:
+            run = runs[0]
+            if (run["path"] == CHECKS and run["head_sha"] == head and any(
+                    p["number"] == n and p["head"]["sha"] == head and p["base"]["sha"] == base
+                    for p in run["pull_requests"])):
+                return run
+
+    # Test a local git merge of these immutable commits. GitHub can retain a
+    # stale refs/pull/N/merge for older PRs until Dependabot next rewrites them.
+    title = f"Patch verification #{n} {head} on {base}"
+    runs = api(f"{workflow}/runs?event=workflow_dispatch&branch=main&per_page=100")["workflow_runs"]
+    for run in runs:
+        if run["display_title"] == title and run["path"] == CHECKS:
+            return run
+    payload = {"ref": "main", "inputs": {"number": str(n), "head": head, "base": base}}
+    subprocess.run(["gh", "api", f"{workflow}/dispatches", "-X", "POST", "--input", "-"],
+                   input=json.dumps(payload), text=True, check=True)
+    return None
 
 
 def linked_prs():
@@ -123,7 +138,7 @@ def linked_prs():
             if (pr := (node["dependabotUpdate"] or {}).get("pullRequest"))}
 
 
-def evaluate(n, linked, run_id=None):
+def evaluate(n, linked):
     path = f"{API}/pulls/{n}"
     pr = api(path)
     head = pr["head"]["sha"]
@@ -146,33 +161,22 @@ def evaluate(n, linked, run_id=None):
     if not versions:
         return "review: dependency changes are not all verified stable patches"
     base = api(f"{API}/git/ref/heads/main")["object"]["sha"]
-    if parent != base:
-        return refresh_stale(n, head, base)
-    runs = api(f"{API}/actions/workflows/pr-checks.yml/runs"
-               f"?event=pull_request&head_sha={head}&per_page=1")["workflow_runs"]
-    if not runs:
-        return "waiting for PR checks"
-    run = runs[0]
-    if (run_id is not None and run["id"] != run_id
-            or run["path"] != CHECKS or run["head_sha"] != head
-            or run["conclusion"] != "success" or not any(
-                p["number"] == n and p["head"]["sha"] == head
-                and p["base"]["ref"] == "main" and p["base"]["sha"] == pr["base"]["sha"]
-                for p in run["pull_requests"])):
-        return "waiting for passing PR checks on the current head and base"
+    run = ci_for(n, head, parent, base)
+    if not run or run["conclusion"] != "success":
+        return "waiting for successful tests of this patch on current main"
     jobs = api(f"{API}/actions/runs/{run['id']}/attempts/{run['run_attempt']}/jobs?per_page=100")
     required = set(os.environ["REQUIRED_JOBS"].split("|"))
     if (not required <= {j["name"] for j in jobs["jobs"]}
             or jobs["total_count"] != len(jobs["jobs"])
             or any(j["conclusion"] != "success" for j in jobs["jobs"])
-            or any(not any(s["name"] == f"Tested base {pr['base']['sha']}"
+            or any(not any(s["name"] == f"Tested base {base}"
                            and s["conclusion"] == "success" for s in j["steps"])
                    for j in jobs["jobs"] if j["name"] in required)):
         return "review: required test jobs missing, skipped or unsuccessful"
     current = api(path)
-    if (current["head"]["sha"] != head or current["base"]["sha"] != pr["base"]["sha"]
+    if (current["head"]["sha"] != head or api(f"{API}/git/ref/heads/main")["object"]["sha"] != base
             or current["base"]["ref"] != "main" or current["state"] != "open"
-            or current["draft"] or current["base"]["sha"] != base or current["mergeable_state"] != "clean"):
+            or current["draft"] or current["mergeable_state"] != "clean"):
         return "review: PR changed or is not cleanly mergeable"
     message = f"School-Security-Patch: {n}\nTested-Base: {base}"
     result = api(f"{path}/merge", "-X", "PUT", "-f", f"sha={head}", "-f", "merge_method=squash",
@@ -185,7 +189,10 @@ def evaluate(n, linked, run_id=None):
 def main():
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     run = event.get("workflow_run")
-    if run:
+    if run and run["event"] == "workflow_dispatch":
+        match = re.fullmatch(r"Patch verification #([0-9]+) [a-f0-9]{40} on [a-f0-9]{40}", run["display_title"])
+        numbers = [int(match[1])] if match else []
+    elif run:
         numbers = [p["number"] for p in run["pull_requests"]]
     else:
         pages = api(f"{API}/pulls?state=open&base=main&per_page=100", "--paginate", "--slurp")
@@ -193,7 +200,7 @@ def main():
     if numbers:
         linked = linked_prs()
         for number in numbers:
-            print(f"#{number}: {evaluate(number, linked, run and run['id'])}", flush=True)
+            print(f"#{number}: {evaluate(number, linked)}", flush=True)
 
 
 if __name__ == "__main__":
