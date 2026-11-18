@@ -19,6 +19,7 @@ import {
   acquireSpeaker,
   estimateDurationMs,
   forceClaimSpeaker,
+  holdSpeakerFor,
   releaseSpeaker,
 } from "@/lib/speaker-lock";
 import { streamToSpeakers, TalkbackError, type SpeakerShortfall } from "@/lib/protect/talkback";
@@ -400,6 +401,9 @@ export async function executeClaimedRun(adapter: ProtectAdapter, runId: number):
     // A failure means nothing is playing; free the speaker immediately. A
     // partial delivery did play, so it keeps the recovery window like a success.
     if (!wasPlayed(outcome.status)) releaseSpeaker();
+    // A recording's recovery window is counted from when it actually ended,
+    // not from when the estimate said it would.
+    else if (run.deliveryMethod === "PROTECT_TALKBACK_AUDIO") holdSpeakerFor(TALKBACK_RECOVERY_MS);
   }
 
   db.update(schema.scheduledRuns)

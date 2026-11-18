@@ -85,6 +85,21 @@ export function releaseSpeaker(atLeastMs = COOLDOWN_MS, now = Date.now()): void 
     .run();
 }
 
+/**
+ * Keeps the speaker claimed for at least this long from now, never shortening
+ * a longer claim. The claim made before playback is an estimate from the
+ * audio's length; connecting, and waiting for a slow speaker so that all of
+ * them start together, can push the real end seconds past it — and whatever
+ * time that eats comes straight out of the recovery window the next cue
+ * depends on.
+ */
+export function holdSpeakerFor(ms: number, now = Date.now()): void {
+  db.update(schema.systemState)
+    .set({ speakerBusyUntil: sql`max(coalesce(speaker_busy_until, 0), ${now + ms})` })
+    .where(eq(schema.systemState.id, 1))
+    .run();
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**

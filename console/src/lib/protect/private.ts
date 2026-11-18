@@ -86,7 +86,24 @@ export class PrivateSession {
     return `https://${env.protectHost}`;
   }
 
-  async login(): Promise<void> {
+  private loginInFlight: Promise<void> | null = null;
+
+  /**
+   * One sign-in at a time, shared by everyone who asks while it is under way.
+   * A bell fans out to one talkback socket per speaker, and when the session
+   * was cold or expired each socket used to sign in for itself: the console
+   * answers those one after another (measured 2026-11-18: sockets created
+   * 0.1–0.5s apart, 0.9s from first to last), so the speakers started that
+   * far apart too — and four sign-ins at once leans on its login rate limit.
+   */
+  login(): Promise<void> {
+    this.loginInFlight ??= this.signIn().finally(() => {
+      this.loginInFlight = null;
+    });
+    return this.loginInFlight;
+  }
+
+  private async signIn(): Promise<void> {
     const res = await fetch(`${this.base()}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -116,6 +133,7 @@ export class PrivateSession {
   async request(method: string, path: string, body?: unknown, retried = false): Promise<{ res: Response; ms: number }> {
     if (!this.cookie) await this.login();
     const headers: Record<string, string> = { Accept: "application/json" };
+    const cookieUsed = this.cookie;
     if (this.cookie) headers.Cookie = this.cookie;
     if (this.csrf) headers["X-CSRF-Token"] = this.csrf;
     if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -130,8 +148,7 @@ export class PrivateSession {
     this.captureCsrf(res);
     if (res.status === 401 && !retried) {
       await res.text().catch(() => "");
-      this.cookie = null;
-      this.csrf = null;
+      this.invalidate(cookieUsed ?? undefined);
       return this.request(method, path, body, true);
     }
     return { res, ms };
@@ -148,8 +165,13 @@ export class PrivateSession {
    * handshake needs this for the same reason request() clears the cookie on a
    * 401: Protect expires sessions, and a stale cookie otherwise fails every
    * talkback attempt until some HTTP call happens to refresh the login.
+   *
+   * Pass the cookie that was refused. Several sockets learn about the same
+   * expiry moments apart, and the later ones must not throw away the fresh
+   * session the first one just signed in for.
    */
-  invalidate(): void {
+  invalidate(refused?: string): void {
+    if (refused !== undefined && this.cookie !== refused) return;
     this.cookie = null;
     this.csrf = null;
   }
