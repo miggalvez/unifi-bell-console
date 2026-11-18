@@ -153,5 +153,5 @@ export function insertClaimedRun(values: Partial<typeof schema.scheduledRuns.$in
 
 /** What streamToSpeakers resolves to when every speaker took the whole stream. */
 export function heardEverywhere(ids: string[], frames = 120): FanOutResult {
-  return { frames, sent: ids.map(() => frames), missed: [] };
+  return { frames, sent: ids.map(() => frames), missed: [], late: [] };
 }

@@ -39,7 +39,7 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 // ffmpeg. Stub that one seam so the drill logic itself is what is under test.
 vi.mock("@/lib/protect/talkback", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/protect/talkback")>()),
-  streamToSpeakers: vi.fn(async (ids: string[]) => ({ frames: 120, sent: ids.map(() => 120), missed: [] })),
+  streamToSpeakers: vi.fn(async (ids: string[]) => ({ frames: 120, sent: ids.map(() => 120), missed: [], late: [] })),
   streamLoopToSpeakers: vi.fn(async () => ({ cycles: 5, frames: 500, reconnects: 0, ended: "until" as const, missed: [] })),
 }));
 
@@ -1016,6 +1016,7 @@ describe("a speaker that misses part of a drill does not end it", () => {
     frames: 120,
     sent: ids.map((id) => (id === gymId ? 0 : 120)),
     missed: [{ speakerId: gymId, partial: false, error: "talkback WS rejected: HTTP 500" }],
+    late: [],
   });
 
   const aborts = () =>
