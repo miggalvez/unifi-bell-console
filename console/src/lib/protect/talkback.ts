@@ -36,14 +36,15 @@ export const TAIL_MS = 300;
  * speakers are in earshot, and seconds of it on the bells where one
  * connection is slow.
  *
- * Kept short on purpose: a connected speaker that is sent nothing is not a
- * state anyone has measured for long (leading silence in the audio itself is
- * known to kill delivery), so the wait covers the ordinary spread and no
- * more. A speaker that takes longer starts late on its own clock, exactly as
- * before, and is named in the result. Raise this only after timing a longer
- * hold on real speakers (scripts/talkback-hold.ts).
+ * How long a connected speaker tolerates silence before its first frame was
+ * measured on the school's four speakers on 2026-11-18
+ * (scripts/talkback-hold.ts): at holds of 0.4, 1, 2, 3 and 5 seconds every
+ * speaker kept its session and took every frame, and all six beeps were heard
+ * at each. The wait here plus ARM_MS stays at less than half the longest hold
+ * that was verified. A speaker slower than this starts late on its own clock
+ * and is named in the result; one that fails outright never holds anyone.
  */
-export const SYNC_WAIT_MS = 600;
+export const SYNC_WAIT_MS = 2_000;
 
 /** A speaker this far behind the shared start is worth telling someone about. */
 export const LATE_NOTE_MS = 100;
@@ -306,8 +307,9 @@ async function openTalkbackSocket(
   speakerId: string,
   retriedAuth = false,
 ): Promise<WebSocket> {
+  let cookie: string | undefined;
   try {
-    const { cookie } = await session.authHeaders();
+    ({ cookie } = await session.authHeaders());
     const url = `wss://${env.protectHost}/proxy/protect/ws/talkback?speaker=${speakerId}`;
     const ws = new WebSocket(url, {
       headers: { Cookie: cookie, Origin: `https://${env.protectHost}` },
@@ -328,7 +330,10 @@ async function openTalkbackSocket(
     // condition request() recovers from on the HTTP path. Log in fresh and
     // retry once; anything else (or a second 401) is a real failure.
     if (!retriedAuth && /HTTP 401/.test((err as Error).message ?? "")) {
-      session.invalidate();
+      // Name the cookie that was refused: every speaker's socket hits the same
+      // expiry, and they must share one fresh sign-in rather than each undo
+      // the last one's.
+      session.invalidate(cookie);
       return openTalkbackSocket(session, speakerId, true);
     }
     // Nothing reached the speaker: auth, connection, or a code error.

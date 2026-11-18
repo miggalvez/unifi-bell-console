@@ -4,6 +4,7 @@ import { updateSystemState, getSystemState } from "@/lib/state";
 import {
   acquireSpeaker,
   estimateDurationMs,
+  holdSpeakerFor,
   releaseSpeaker,
   tryClaimSpeaker,
   COOLDOWN_MS,
@@ -113,5 +114,28 @@ describe("executor + lock", () => {
     await executeClaimedRun(adapter, id);
     // A failed cue is not playing, so the next one must not have to wait it out.
     expect(getSystemState().speakerBusyUntil!).toBeLessThanOrEqual(Date.now() + COOLDOWN_MS);
+  });
+});
+
+describe("holdSpeakerFor keeps the recovery window honest", () => {
+  it("extends a claim that playback outran", () => {
+    const now = 1_000_000;
+    updateSystemState({ speakerBusyUntil: now + 1_000 });
+    holdSpeakerFor(7_000, now);
+    expect(getSystemState().speakerBusyUntil).toBe(now + 7_000);
+  });
+
+  it("never shortens a longer claim", () => {
+    const now = 1_000_000;
+    updateSystemState({ speakerBusyUntil: now + 30_000 });
+    holdSpeakerFor(7_000, now);
+    expect(getSystemState().speakerBusyUntil).toBe(now + 30_000);
+  });
+
+  it("claims a free speaker", () => {
+    const now = 1_000_000;
+    updateSystemState({ speakerBusyUntil: null });
+    holdSpeakerFor(7_000, now);
+    expect(getSystemState().speakerBusyUntil).toBe(now + 7_000);
   });
 });
