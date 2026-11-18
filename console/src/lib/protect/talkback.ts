@@ -148,27 +148,20 @@ export async function streamToSpeakers(speakerIds: string[], opts: StreamOptions
   if (frames.length === 0) throw new TalkbackError("no audio frames produced by ffmpeg", false);
 
   const armMs = opts.armMs ?? ARM_MS;
-  const opens = speakerIds.map((id) => openTalkbackSocket(session, id));
-  // The shared start: one arm delay after the last connection opens, or after
-  // SYNC_WAIT_MS has passed since the first one did — whichever comes first.
-  let firstOpened = (): void => {};
-  const sharedStart = new Promise<number>((resolve) => {
-    let cap: ReturnType<typeof setTimeout> | undefined;
-    const go = (): void => {
-      clearTimeout(cap);
-      resolve(Date.now() + armMs);
-    };
-    firstOpened = () => {
-      cap ??= setTimeout(go, SYNC_WAIT_MS);
-    };
-    void Promise.allSettled(opens).then(go);
-  });
+  const gate = startGate(speakerIds.length, armMs);
+  const sharedStart = gate.start;
   const startedAt: (number | undefined)[] = speakerIds.map(() => undefined);
   const results = await Promise.allSettled(
-    opens.map(async (open, i) => {
-      const ws = await open;
+    speakerIds.map(async (id, i) => {
+      let ws: WebSocket;
+      try {
+        ws = await openTalkbackSocket(session, id);
+      } catch (err) {
+        gate.report(false);
+        throw err;
+      }
       const openedAt = Date.now();
-      firstOpened();
+      gate.report(true);
       // A speaker that missed the shared start still gets its full arm delay.
       const start = Math.max(await sharedStart, openedAt + armMs);
       startedAt[i] = start;
@@ -193,6 +186,35 @@ export async function streamToSpeakers(speakerIds: string[], opts: StreamOptions
     return sent[i] > 0 && lateMs >= LATE_NOTE_MS ? [{ speakerId, lateMs }] : [];
   });
   return { frames: frames.length, sent, missed, late };
+}
+
+/**
+ * The moment every speaker in a fan-out starts: one arm delay after the last
+ * connection is in, or after SYNC_WAIT_MS has passed since the first one
+ * opened — whichever comes first. Each speaker reports how its first
+ * connection attempt went; a failure counts as "in", so a speaker that is
+ * offline or refuses the session never holds the others.
+ *
+ * A connection that opens after the gate (a slow speaker, or a reconnect much
+ * later) simply takes its own arm delay: start = max(shared, openedAt + arm).
+ */
+function startGate(speakers: number, armMs: number): { start: Promise<number>; report(opened: boolean): void } {
+  let resolve!: (at: number) => void;
+  const start = new Promise<number>((r) => (resolve = r));
+  let cap: ReturnType<typeof setTimeout> | undefined;
+  let reported = 0;
+  const go = (): void => {
+    clearTimeout(cap);
+    resolve(Date.now() + armMs);
+  };
+  if (speakers === 0) go();
+  return {
+    start,
+    report(opened) {
+      if (opened) cap ??= setTimeout(go, SYNC_WAIT_MS);
+      if (++reported >= speakers) go();
+    },
+  };
 }
 
 /**
@@ -456,6 +478,8 @@ const LOOP_MAX_CONSECUTIVE_FAILURES = 4;
  * each opening — verified by ear; a single continuous session has no interior
  * boundaries to pay for. A 240s session was verified end-to-end on hardware.
  *
+ * All speakers begin their first cycle at the same moment (see startGate).
+ *
  * If a socket dies mid-stream the loop reconnects after SESSION_RECOVERY_MS
  * and RESTARTS the interrupted cycle from its beginning — the cycle opens with
  * the drill/alert announcement, so a resumed sound is never heard untagged.
@@ -474,7 +498,10 @@ export async function streamLoopToSpeakers(speakerIds: string[], opts: LoopOptio
   }
   if (cycleFrames.length === 0) throw new TalkbackError("no audio frames produced by ffmpeg", false);
 
-  const results = await Promise.allSettled(speakerIds.map((id) => loopOneSpeaker(session, id, cycleFrames, gapFrames, opts)));
+  const gate = startGate(speakerIds.length, ARM_MS);
+  const results = await Promise.allSettled(
+    speakerIds.map((id) => loopOneSpeaker(session, id, cycleFrames, gapFrames, opts, gate)),
+  );
   const ok = results.filter((r): r is PromiseFulfilledResult<LoopResult> => r.status === "fulfilled");
   if (ok.length === 0) throw everySpeakerFailed(results);
   const missed: SpeakerShortfall[] = [];
@@ -497,12 +524,21 @@ async function loopOneSpeaker(
   cycleFrames: Buffer[],
   gapFrames: Buffer[],
   opts: LoopOptions,
+  gate: ReturnType<typeof startGate>,
 ): Promise<LoopResult> {
   let cycles = 0;
   let frames = 0;
   let reconnects = 0;
   let consecutiveFailures = 0;
   let ended: LoopResult["ended"] = "until";
+  // Only the first connection attempt counts towards the shared start; later
+  // ones are reconnects, long after everyone else began.
+  let firstAttempt = true;
+  const reportFirst = (opened: boolean): void => {
+    if (!firstAttempt) return;
+    firstAttempt = false;
+    gate.report(opened);
+  };
 
   const done = () => {
     if (opts.shouldStop()) {
@@ -517,6 +553,7 @@ async function loopOneSpeaker(
     try {
       ws = await openTalkbackSocket(session, speakerId);
     } catch (err) {
+      reportFirst(false);
       if (++consecutiveFailures >= LOOP_MAX_CONSECUTIVE_FAILURES) {
         throw new TalkbackError(
           `could not (re)establish the talkback session after ${consecutiveFailures} attempts: ${(err as Error).message}`,
@@ -528,11 +565,26 @@ async function loopOneSpeaker(
       continue;
     }
 
+    const openedAt = Date.now();
+    reportFirst(true);
     let socketDied = false;
     try {
-      await sleep(ARM_MS);
+      // Every speaker's first connection starts at the shared moment, so the
+      // building hears one announcement rather than four a fraction apart. A
+      // reconnect finds that moment long past and just takes its arm delay.
+      // Waited in slices: Stop must not sit behind a slow speaker.
+      let shared: number | undefined;
+      const sharedKnown = gate.start.then((at) => {
+        shared = at;
+      });
+      while (shared === undefined && !done()) await Promise.race([sharedKnown, sleep(100)]);
       // Pacing restarts per connection: frame index i against this socket's t0.
-      const t0 = Date.now();
+      const t0 = Math.max(shared ?? 0, openedAt + ARM_MS);
+      while (!done()) {
+        const arm = t0 - Date.now();
+        if (arm <= 0) break;
+        await sleep(Math.min(arm, 100));
+      }
       let i = 0;
       const sendPaced = async (frame: Buffer): Promise<boolean> => {
         if (ws.readyState !== WebSocket.OPEN) return false;
@@ -598,6 +650,10 @@ async function loopOneSpeaker(
     reconnects++;
     await sleep(SESSION_RECOVERY_MS);
   }
+
+  // Never got as far as a first attempt (stopped before it began): still
+  // counted, or the others would wait out the full sync window for nobody.
+  reportFirst(false);
 
   // Zero cycles with a clean exit means the deadline or an abort arrived
   // before anything went out — a caller decision, not an error. Refusals and
