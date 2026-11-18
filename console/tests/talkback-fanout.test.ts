@@ -90,7 +90,9 @@ vi.mock("ws", async () => {
   return { default: FakeSocket };
 });
 
-const { streamToSpeakers, TalkbackError, ARM_MS, SYNC_WAIT_MS } = await import("@/lib/protect/talkback");
+const { streamToSpeakers, streamLoopToSpeakers, TalkbackError, ARM_MS, SYNC_WAIT_MS } = await import(
+  "@/lib/protect/talkback"
+);
 
 function setModes(modes: Record<string, Mode>, openDelay: Record<string, number> = {}): void {
   seams.openDelay.clear();
@@ -241,4 +243,60 @@ describe("a measurement stream can be told to get off the speakers", () => {
     expect((err as InstanceType<typeof TalkbackError>).retryable).toBe(false);
     expect(Date.now() - t0).toBeLessThan(300 + 250);
   });
+});
+
+describe("streamLoopToSpeakers starts every speaker's first cycle on one clock", () => {
+  // Alerts and drill sounds open with a spoken announcement; four copies of it
+  // a fraction of a second apart are harder to understand than a bell is.
+  const loop = (ids: string[], o: { until: number; shouldStop?: () => boolean }) =>
+    streamLoopToSpeakers(ids, { files: ["a.mp3"], shouldStop: () => false, ...o });
+
+  it("speakers whose connections open at different speeds still start together", async () => {
+    setModes({ hall: "ok", gym: "ok", lab: "ok" }, { hall: 0, gym: 150, lab: 300 });
+    const t0 = Date.now();
+    const r = await loop(["hall", "gym", "lab"], { until: t0 + 300 + ARM_MS + 250 });
+    const starts = ["hall", "gym", "lab"].map((id) => seams.firstSendAt.get(id)!);
+    expect(Math.max(...starts) - Math.min(...starts)).toBeLessThan(40);
+    // The slowest connection still got its whole arm delay before any audio.
+    expect(Math.min(...starts) - t0).toBeGreaterThanOrEqual(300 + ARM_MS - 5);
+    expect(r.cycles).toBeGreaterThan(0);
+    expect(r.missed).toEqual([]);
+  });
+
+  it("does not hold the alert for one slow connection: the rest start after the sync window", async () => {
+    setModes({ hall: "ok", gym: "ok" }, { hall: 0, gym: SYNC_WAIT_MS + 400 });
+    const t0 = Date.now();
+    await loop(["hall", "gym"], { until: t0 + SYNC_WAIT_MS + 400 + ARM_MS + 250 });
+    const hall = seams.firstSendAt.get("hall")! - t0;
+    const gym = seams.firstSendAt.get("gym")! - t0;
+    expect(hall).toBeGreaterThanOrEqual(SYNC_WAIT_MS + ARM_MS - 5);
+    expect(hall).toBeLessThan(SYNC_WAIT_MS + ARM_MS + 150);
+    // The slow one plays too, behind, with its own full arm delay.
+    expect(gym).toBeGreaterThanOrEqual(SYNC_WAIT_MS + 400 + ARM_MS - 5);
+  });
+
+  it("Stop pressed while waiting for a slow speaker: nothing is sent, and it says stopped", async () => {
+    setModes({ hall: "ok", gym: "ok" }, { hall: 0, gym: 1_200 });
+    let stop = false;
+    setTimeout(() => (stop = true), 200);
+    const r = await loop(["hall", "gym"], { until: Date.now() + 60_000, shouldStop: () => stop });
+    expect(seams.firstSendAt.size).toBe(0);
+    expect(r.ended).toBe("stopped");
+    expect(r.cycles).toBe(0);
+  });
+
+  it(
+    "a speaker that refuses the connection never holds the others",
+    async () => {
+      setModes({ hall: "ok", gym: "refused" }, { hall: 0, gym: 100 });
+      const t0 = Date.now();
+      // Short alert: the refused speaker is still in its first retry wait when
+      // the deadline passes, so this ends without it.
+      await loop(["hall", "gym"], { until: t0 + 100 + ARM_MS + 300 });
+      // Hall started one arm delay after gym's refusal came back — not after
+      // the sync window, and not after gym's retry.
+      expect(seams.firstSendAt.get("hall")! - t0).toBeLessThan(100 + ARM_MS + 150);
+    },
+    12_000,
+  );
 });
