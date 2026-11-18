@@ -29,6 +29,26 @@ export const LEAD_MS = 400;
 export const TAIL_MS = 300;
 
 /**
+ * How long speakers that are already connected wait for a slower one, so the
+ * whole building starts on one clock. Connections normally open ~0.1s apart
+ * (measured 2026-11-18: a 0.3s spread across four speakers), and each speaker
+ * used to start the moment its own connection opened — an echo wherever two
+ * speakers are in earshot, and seconds of it on the bells where one
+ * connection is slow.
+ *
+ * Kept short on purpose: a connected speaker that is sent nothing is not a
+ * state anyone has measured for long (leading silence in the audio itself is
+ * known to kill delivery), so the wait covers the ordinary spread and no
+ * more. A speaker that takes longer starts late on its own clock, exactly as
+ * before, and is named in the result. Raise this only after timing a longer
+ * hold on real speakers (scripts/talkback-hold.ts).
+ */
+export const SYNC_WAIT_MS = 600;
+
+/** A speaker this far behind the shared start is worth telling someone about. */
+export const LATE_NOTE_MS = 100;
+
+/**
  * Distinguishes "we never sent a byte" from "we were mid-stream". Only the
  * latter is genuinely uncertain — a setup failure means nothing played, and
  * saying otherwise would send someone chasing audio that never happened.
@@ -69,6 +89,17 @@ export interface StreamOptions {
   silenceSeconds?: number;
   speakerId?: string;
   ffmpegPath?: string;
+  /**
+   * Measurement only (scripts/talkback-hold.ts): how long a connected speaker
+   * is left silent before the first frame. Deliveries use ARM_MS.
+   */
+  armMs?: number;
+  /**
+   * Measurement only: polled about every 100ms while waiting and before every
+   * frame; returning true abandons the stream at once, so a test tone gets
+   * off the speakers the moment something real needs them.
+   */
+  shouldStop?: () => boolean;
 }
 
 /**
@@ -91,11 +122,18 @@ export interface FanOutResult {
   sent: number[];
   /** Speakers that got less than all of it. Empty when every speaker got everything. */
   missed: SpeakerShortfall[];
+  /**
+   * Speakers that played, but started after the rest because their connection
+   * took longer than SYNC_WAIT_MS to open. Empty when everyone started together.
+   */
+  late: { speakerId: string; lateMs: number }[];
 }
 
 /**
- * Streams to every speaker at once, one socket each. Throws only when no
- * speaker got anything; otherwise the shortfalls are in `missed`.
+ * Streams to every speaker at once, one socket each, all on one clock: the
+ * connections open first, then every speaker is sent frame N at the same
+ * moment. Throws only when no speaker got anything; otherwise the shortfalls
+ * are in `missed` and anyone who started behind the others is in `late`.
  */
 export async function streamToSpeakers(speakerIds: string[], opts: StreamOptions): Promise<FanOutResult> {
   const session = getPrivateSession();
@@ -108,18 +146,36 @@ export async function streamToSpeakers(speakerIds: string[], opts: StreamOptions
   }
   if (frames.length === 0) throw new TalkbackError("no audio frames produced by ffmpeg", false);
 
-  const results = await Promise.allSettled(speakerIds.map((id) => sendFrames(session, id, frames)));
+  const armMs = opts.armMs ?? ARM_MS;
+  const opens = speakerIds.map((id) => openTalkbackSocket(session, id));
+  // The shared start: one arm delay after the last connection opens, or after
+  // SYNC_WAIT_MS has passed since the first one did — whichever comes first.
+  let firstOpened = (): void => {};
+  const sharedStart = new Promise<number>((resolve) => {
+    let cap: ReturnType<typeof setTimeout> | undefined;
+    const go = (): void => {
+      clearTimeout(cap);
+      resolve(Date.now() + armMs);
+    };
+    firstOpened = () => {
+      cap ??= setTimeout(go, SYNC_WAIT_MS);
+    };
+    void Promise.allSettled(opens).then(go);
+  });
+  const startedAt: (number | undefined)[] = speakerIds.map(() => undefined);
+  const results = await Promise.allSettled(
+    opens.map(async (open, i) => {
+      const ws = await open;
+      const openedAt = Date.now();
+      firstOpened();
+      // A speaker that missed the shared start still gets its full arm delay.
+      const start = Math.max(await sharedStart, openedAt + armMs);
+      startedAt[i] = start;
+      return sendOnSocket(ws, frames, start, opts.shouldStop);
+    }),
+  );
   const sent = results.map((r) => (r.status === "fulfilled" ? r.value : 0));
-  if (sent.every((n) => n === 0)) {
-    // Every speaker failed — surface the first reason and whether anything went out.
-    const firstRejection = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
-    const cause = firstRejection?.reason as TalkbackError | Error | undefined;
-    throw new TalkbackError(
-      cause?.message ?? "no frames transmitted",
-      cause instanceof TalkbackError ? cause.transmitted : false,
-      { cause, retryable: cause instanceof TalkbackError ? cause.retryable : false },
-    );
-  }
+  if (sent.every((n) => n === 0)) throw everySpeakerFailed(results);
   const missed: SpeakerShortfall[] = [];
   results.forEach((r, i) => {
     if (r.status === "fulfilled" && r.value >= frames.length) return;
@@ -130,7 +186,35 @@ export async function streamToSpeakers(speakerIds: string[], opts: StreamOptions
       error: err?.message,
     });
   });
-  return { frames: frames.length, sent, missed };
+  const shared = await sharedStart;
+  const late = speakerIds.flatMap((speakerId, i) => {
+    const lateMs = (startedAt[i] ?? shared) - shared;
+    return sent[i] > 0 && lateMs >= LATE_NOTE_MS ? [{ speakerId, lateMs }] : [];
+  });
+  return { frames: frames.length, sent, missed, late };
+}
+
+/**
+ * The one error for a fan-out in which no speaker completed. Its two flags
+ * decide what the caller may do next, so they are judged across EVERY
+ * speaker, never just the first one listed:
+ *
+ *   - transmitted: any speaker was sent audio before failing. One room having
+ *     heard part of it makes the whole delivery uncertain.
+ *   - retryable: nobody was sent anything AND at least one failure is the
+ *     passing kind (a refused session). Trying again cannot ring twice
+ *     anywhere, and may reach the speaker that was only busy.
+ *
+ * A failure of unknown shape counts as transmitted — the cautious reading.
+ */
+function everySpeakerFailed(results: PromiseSettledResult<unknown>[]): TalkbackError {
+  const failures = results.flatMap((r) => (r.status === "rejected" ? [r.reason as TalkbackError | Error] : []));
+  const heard = failures.find((e) => !(e instanceof TalkbackError) || e.transmitted);
+  const cause = heard ?? failures[0];
+  return new TalkbackError(cause?.message ?? "no frames transmitted", heard !== undefined, {
+    cause,
+    retryable: heard === undefined && failures.some((e) => e instanceof TalkbackError && e.retryable),
+  });
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -254,19 +338,41 @@ async function openTalkbackSocket(
 
 async function sendFrames(session: PrivateSession, speakerId: string, frames: Buffer[]): Promise<number> {
   const ws = await openTalkbackSocket(session, speakerId);
+  return sendOnSocket(ws, frames, Date.now() + ARM_MS);
+}
+
+/**
+ * Sends the frames on an open socket, the first one at `startAt` — which must
+ * leave the NVR its arm delay after the socket opened — and closes the socket.
+ * Taking the start time from the caller is what lets several speakers share
+ * one clock. Returns the number of frames transmitted.
+ */
+async function sendOnSocket(
+  ws: WebSocket,
+  frames: Buffer[],
+  startAt: number,
+  shouldStop?: () => boolean,
+): Promise<number> {
   let sent = 0;
+  const stopped = (): boolean => shouldStop?.() ?? false;
 
   try {
-    await sleep(ARM_MS); // let the NVR arm the device's sink stream
-    const t0 = Date.now();
+    // Let the NVR arm the device's sink stream; nothing goes out before this.
+    // With a stop check the wait is sliced, so a long hold can be abandoned.
+    while (!stopped()) {
+      const arm = startAt - Date.now();
+      if (arm <= 0) break;
+      await sleep(shouldStop ? Math.min(arm, 100) : arm);
+    }
     for (let i = 0; i < frames.length; i++) {
-      if (ws.readyState !== WebSocket.OPEN) break;
-      const target = t0 + i * FRAME_MS - LEAD_MS;
-      const wait = target - Date.now();
+      if (stopped() || ws.readyState !== WebSocket.OPEN) break;
+      const wait = startAt + i * FRAME_MS - LEAD_MS - Date.now();
       if (wait > 0) await sleep(wait);
       ws.send(frames[i]);
       sent++;
     }
+    // Abandoned on request: a short count, not a refusal by the speaker.
+    if (stopped()) return sent;
     await sleep(TAIL_MS);
     // The socket closing during the arm delay is the speaker refusing a second
     // session while it is still tearing the last one down. Nothing was sent,
@@ -281,6 +387,9 @@ async function sendFrames(session: PrivateSession, speakerId: string, frames: Bu
     }
     return sent;
   } catch (err) {
+    // Already classified (the refusal above): rewrapping it would drop
+    // `retryable`, and the caller's safe retry would never run.
+    if (err instanceof TalkbackError) throw err;
     throw new TalkbackError((err as Error).message, sent > 0, { cause: err });
   } finally {
     try {
@@ -362,14 +471,7 @@ export async function streamLoopToSpeakers(speakerIds: string[], opts: LoopOptio
 
   const results = await Promise.allSettled(speakerIds.map((id) => loopOneSpeaker(session, id, cycleFrames, gapFrames, opts)));
   const ok = results.filter((r): r is PromiseFulfilledResult<LoopResult> => r.status === "fulfilled");
-  if (ok.length === 0) {
-    const cause = (results[0] as PromiseRejectedResult | undefined)?.reason as Error | undefined;
-    throw new TalkbackError(
-      cause?.message ?? "no frames transmitted",
-      cause instanceof TalkbackError ? cause.transmitted : false,
-      { cause, retryable: cause instanceof TalkbackError ? cause.retryable : false },
-    );
-  }
+  if (ok.length === 0) throw everySpeakerFailed(results);
   const missed: SpeakerShortfall[] = [];
   results.forEach((r, i) => {
     if (r.status === "fulfilled") return;

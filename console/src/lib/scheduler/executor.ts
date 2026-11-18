@@ -170,7 +170,8 @@ async function performDelivery(adapter: ProtectAdapter, run: RunRow): Promise<Ex
         const r = await streamToSpeakers(ids, files ? { files } : { file: run.audioPath! });
         const total = r.sent.reduce((a, b) => a + b, 0);
         if (total === 0) return { status: "FAILED", message: "no audio frames transmitted" };
-        const retried = attempt > 1 ? ` — after ${attempt - 1} retry` : "";
+        const retried =
+          (attempt > 1 ? ` — after ${attempt - 1} retry` : "") + (r.late.length > 0 ? ` — ${describeLate(r.late)}` : "");
         // Some rooms heard it and some did not. Not a failure — retrying would
         // ring it twice where it did play — but never a plain success either:
         // that is how two offline speakers went unnoticed for five days.
@@ -291,6 +292,26 @@ export function describeShortfall(missed: SpeakerShortfall[], targeted: number):
     return `${sp?.name ?? sp?.mac ?? m.speakerId} (${why})`;
   });
   return `${missed.length} of ${targeted} speakers missed it: ${parts.join(", ")}`;
+}
+
+/**
+ * Names the speakers that played behind the others — e.g. "Upstairs Speaker
+ * started 2.1s after the others". They heard all of it, so this is a note on
+ * an otherwise good run, not a shortfall.
+ */
+export function describeLate(late: { speakerId: string; lateMs: number }[]): string {
+  const rows = db
+    .select({ id: schema.speakers.id, name: schema.speakers.name, mac: schema.speakers.mac })
+    .from(schema.speakers)
+    .where(inArray(schema.speakers.id, late.map((l) => l.speakerId)))
+    .all();
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return late
+    .map((l) => {
+      const sp = byId.get(l.speakerId);
+      return `${sp?.name ?? sp?.mac ?? l.speakerId} started ${(l.lateMs / 1000).toFixed(1)}s after the others`;
+    })
+    .join(", ");
 }
 
 /** Talkback addresses speakers by Protect id; zones store MACs. */

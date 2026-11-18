@@ -247,12 +247,27 @@ describe("talkback runs that reach only some speakers", () => {
   }
 
   it("all speakers: plain SUCCESS, as before", async () => {
-    streamMock.mockImplementationOnce(async (ids) => ({ frames: 314, sent: ids.map(() => 314), missed: [] }));
+    streamMock.mockImplementationOnce(async (ids) => ({ frames: 314, sent: ids.map(() => 314), missed: [], late: [] }));
     const id = talkbackRun([hall, office]);
     const outcome = await executeClaimedRun(fakeAdapter({}), id);
     expect(outcome.status).toBe("SUCCESS");
     expect(runRow(id).status).toBe("SUCCESS");
     expect(runRow(id).resultMessage).toBe("streamed 314/314 frames (no delivery confirmation available)");
+  });
+
+  it("a speaker that started behind the others is named on an otherwise plain SUCCESS", async () => {
+    streamMock.mockImplementationOnce(async (ids) => ({
+      frames: 314,
+      sent: ids.map(() => 314),
+      missed: [],
+      late: [{ speakerId: `spk-${office}`, lateMs: 2140 }],
+    }));
+    const id = talkbackRun([hall, office]);
+    const outcome = await executeClaimedRun(fakeAdapter({}), id);
+    expect(outcome.status).toBe("SUCCESS");
+    expect(runRow(id).resultMessage).toBe(
+      "streamed 314/314 frames (no delivery confirmation available) — Office started 2.1s after the others",
+    );
   });
 
   it("some speakers: PARTIAL, naming the speakers that missed it and why", async () => {
@@ -262,6 +277,7 @@ describe("talkback runs that reach only some speakers", () => {
       missed: ids
         .filter((sid) => sid === `spk-${gym}` || sid === `spk-${lab}`)
         .map((speakerId) => ({ speakerId, partial: false, error: "talkback WS rejected: HTTP 500" })),
+      late: [],
     }));
     const id = talkbackRun(all);
     const outcome = await executeClaimedRun(fakeAdapter({}), id);
@@ -289,6 +305,7 @@ describe("talkback runs that reach only some speakers", () => {
         { speakerId: `spk-${hall}`, partial: false, error: "talkback WS rejected: HTTP 404" },
         { speakerId: `spk-${office}`, partial: true },
       ],
+      late: [],
     }));
     const id = talkbackRun([hall, office]);
     const outcome = await executeClaimedRun(fakeAdapter({}), id);

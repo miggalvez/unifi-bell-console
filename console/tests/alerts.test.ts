@@ -4,7 +4,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 // tests exercise the alert loop's own logic.
 vi.mock("@/lib/protect/talkback", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/protect/talkback")>()),
-  streamToSpeakers: vi.fn(async (ids: string[]) => ({ frames: 120, sent: ids.map(() => 120), missed: [] })),
+  streamToSpeakers: vi.fn(async (ids: string[]) => ({ frames: 120, sent: ids.map(() => 120), missed: [], late: [] })),
   streamLoopToSpeakers: vi.fn(async () => ({ cycles: 4, frames: 400, reconnects: 0, ended: "until" as const, missed: [] })),
 }));
 import { eq } from "drizzle-orm";
