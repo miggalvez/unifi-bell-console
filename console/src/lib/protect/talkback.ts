@@ -786,7 +786,15 @@ async function loopOneSpeaker(
           }
         }
       }
-      if (!socketDied) await sleep(TAIL_MS);
+      if (!socketDied) {
+        await sleep(TAIL_MS);
+        // The OS answers for a datagram after send() returns, so a refusal of
+        // the last ones has had no later frame to surface on (which is what
+        // moves a speaker to the relay mid-stream). Look before calling this
+        // speaker done: a refusal here makes it a shortfall, named like any
+        // other, instead of a clean run with the ending missing.
+        if (sink) await sink.settled();
+      }
     } finally {
       try {
         ws.close();
