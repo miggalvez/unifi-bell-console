@@ -8,7 +8,9 @@
  * been transmitted. Anything ambiguous becomes DELIVERY_UNCERTAIN and is never
  * retried automatically — the UI offers a manual re-trigger instead.
  */
+import { isIPv4 } from "node:net";
 import { asc, eq, inArray } from "drizzle-orm";
+import { env } from "@/env";
 import { db, schema } from "@/lib/db/client";
 import { writeAudit } from "@/lib/audit";
 import type { ProtectAdapter } from "@/lib/protect/adapter";
@@ -168,7 +170,10 @@ async function performDelivery(adapter: ProtectAdapter, run: RunRow): Promise<Ex
     let lastErr: unknown;
     for (let attempt = 1; attempt <= TALKBACK_ATTEMPTS; attempt++) {
       try {
-        const r = await streamToSpeakers(ids, files ? { files } : { file: run.audioPath! });
+        const r = await streamToSpeakers(ids, {
+          ...(files ? { files } : { file: run.audioPath! }),
+          directHosts: directHostsFor(ids),
+        });
         const total = r.sent.reduce((a, b) => a + b, 0);
         if (total === 0) return { status: "FAILED", message: "no audio frames transmitted" };
         const retried =
@@ -182,6 +187,7 @@ async function performDelivery(adapter: ProtectAdapter, run: RunRow): Promise<Ex
             latencyMs: performance.now() - t0,
             message:
               `${describeShortfall(r.missed, ids.length)} — streamed ${r.sent.join("/")} of ${r.frames} frames` +
+              describeDirect(r.direct, ids.length) +
               retried,
           };
         }
@@ -190,7 +196,10 @@ async function performDelivery(adapter: ProtectAdapter, run: RunRow): Promise<Ex
         return {
           status: "SUCCESS",
           latencyMs: performance.now() - t0,
-          message: `streamed ${r.sent.join("/")} frames (no delivery confirmation available)` + retried,
+          message:
+            `streamed ${r.sent.join("/")} frames${describeDirect(r.direct, ids.length)}` +
+            " (no delivery confirmation available)" +
+            retried,
         };
       } catch (err) {
         lastErr = err;
@@ -313,6 +322,29 @@ export function describeLate(late: { speakerId: string; lateMs: number }[]): str
       return `${sp?.name ?? sp?.mac ?? l.speakerId} started ${(l.lateMs / 1000).toFixed(1)}s after the others`;
     })
     .join(", ");
+}
+
+/**
+ * Each target speaker's own address, when this console is set to send audio
+ * to the speakers directly (PROTECT_TALKBACK_DIRECT). A speaker whose address
+ * is not known yet is simply left out, and goes through Protect as before.
+ */
+function directHostsFor(ids: string[]): Map<string, string> | undefined {
+  if (!env.talkbackDirect || ids.length === 0) return undefined;
+  const rows = db
+    .select({ id: schema.speakers.id, host: schema.speakers.host })
+    .from(schema.speakers)
+    .where(inArray(schema.speakers.id, ids))
+    .all();
+  const hosts = new Map<string, string>();
+  for (const r of rows) if (r.host && isIPv4(r.host)) hosts.set(r.id, r.host);
+  return hosts.size > 0 ? hosts : undefined;
+}
+
+/** Says which way the audio travelled — it decides what a later skip can be blamed on. */
+function describeDirect(direct: number, targeted: number): string {
+  if (direct === 0) return "";
+  return direct >= targeted ? " directly to the speakers" : ` (${direct} of ${targeted} speakers directly)`;
 }
 
 /** Talkback addresses speakers by Protect id; zones store MACs. */

@@ -53,6 +53,14 @@ export const env = {
   get secureCookies() {
     return process.env.SECURE_COOKIES === "true";
   },
+  /**
+   * Send recorded audio straight to each speaker instead of relaying it
+   * through Protect. Opt-in: it only works when this machine is on the
+   * speakers' own network, and nothing reports back if it is not.
+   */
+  get talkbackDirect() {
+    return process.env.PROTECT_TALKBACK_DIRECT === "true";
+  },
   get ffmpegPath() {
     return process.env.FFMPEG_PATH ?? "ffmpeg";
   },

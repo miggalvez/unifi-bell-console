@@ -19,6 +19,8 @@
  * never "it played". Use camera-mic scoring (verify-audio.mts) to confirm.
  */
 import { spawn } from "node:child_process";
+import dgram from "node:dgram";
+import { isIPv4 } from "node:net";
 import WebSocket from "ws";
 import { env } from "@/env";
 import { PrivateSession, getPrivateSession } from "./private";
@@ -45,6 +47,28 @@ export const TAIL_MS = 300;
  * and is named in the result; one that fails outright never holds anyone.
  */
 export const SYNC_WAIT_MS = 2_000;
+
+/**
+ * Where a speaker listens for audio once a talkback session is open. Protect
+ * sets this when the WebSocket connects ("typeIn":"serverudp","bindPort":7004,
+ * no source filter) and then acts as a plain relay: every frame it is sent
+ * over the WebSocket leaves as one identical UDP datagram to this port
+ * (captured on the wire, 2026-11-19).
+ *
+ * That relay runs on Protect's main thread, and Protect forces a garbage
+ * collection every five minutes that stops that thread for 0.4–1.9s. Any bell
+ * playing at that moment lost the audio that should have been relayed during
+ * it. Sent straight to the speaker, the same frames are untouched by the
+ * pause — verified by ear on four speakers across a 587ms and a 1,068ms pause.
+ */
+export const SPEAKER_AUDIO_PORT = 7004;
+
+/**
+ * With the audio going direct, the WebSocket carries nothing — it only keeps
+ * the speaker armed. A ping this often keeps an otherwise silent connection
+ * from looking dead to anything in between. In frames: about five seconds.
+ */
+const DIRECT_KEEPALIVE_FRAMES = 117;
 
 /** A speaker this far behind the shared start is worth telling someone about. */
 export const LATE_NOTE_MS = 100;
@@ -91,6 +115,17 @@ export interface StreamOptions {
   speakerId?: string;
   ffmpegPath?: string;
   /**
+   * Speaker id → that speaker's own LAN address. A speaker listed here is sent
+   * its audio directly (see SPEAKER_AUDIO_PORT) and nothing through Protect;
+   * the session is still opened through Protect, which is what arms it. A
+   * speaker not listed, or listed with something that is not an IPv4 address,
+   * is relayed through Protect as before. Never both: that plays twice.
+   *
+   * Only for a caller that knows this machine can reach the speakers — a
+   * datagram to an unreachable address fails silently.
+   */
+  directHosts?: ReadonlyMap<string, string>;
+  /**
    * Measurement only (scripts/talkback-hold.ts): how long a connected speaker
    * is left silent before the first frame. Deliveries use ARM_MS.
    */
@@ -128,6 +163,8 @@ export interface FanOutResult {
    * took longer than SYNC_WAIT_MS to open. Empty when everyone started together.
    */
   late: { speakerId: string; lateMs: number }[];
+  /** How many speakers were sent their audio directly rather than via Protect. */
+  direct: number;
 }
 
 /**
@@ -151,6 +188,14 @@ export async function streamToSpeakers(speakerIds: string[], opts: StreamOptions
   const gate = startGate(speakerIds.length, armMs);
   const sharedStart = gate.start;
   const startedAt: (number | undefined)[] = speakerIds.map(() => undefined);
+  const hosts = speakerIds.map((id) => {
+    const host = opts.directHosts?.get(id);
+    return host !== undefined && isIPv4(host) ? host : undefined;
+  });
+  // One socket serves every direct speaker. Its errors must never take the
+  // process down; a failed send is reported through the sink instead.
+  const udp = hosts.some((h) => h !== undefined) ? dgram.createSocket("udp4") : null;
+  udp?.on("error", () => {});
   const results = await Promise.allSettled(
     speakerIds.map(async (id, i) => {
       let ws: WebSocket;
@@ -165,9 +210,15 @@ export async function streamToSpeakers(speakerIds: string[], opts: StreamOptions
       // A speaker that missed the shared start still gets its full arm delay.
       const start = Math.max(await sharedStart, openedAt + armMs);
       startedAt[i] = start;
-      return sendOnSocket(ws, frames, start, opts.shouldStop);
+      const host = hosts[i];
+      return sendOnSocket(ws, frames, start, opts.shouldStop, udp && host ? directSink(udp, host) : undefined);
     }),
   );
+  try {
+    udp?.close();
+  } catch {
+    /* already closed */
+  }
   const sent = results.map((r) => (r.status === "fulfilled" ? r.value : 0));
   if (sent.every((n) => n === 0)) throw everySpeakerFailed(results);
   const missed: SpeakerShortfall[] = [];
@@ -185,7 +236,55 @@ export async function streamToSpeakers(speakerIds: string[], opts: StreamOptions
     const lateMs = (startedAt[i] ?? shared) - shared;
     return sent[i] > 0 && lateMs >= LATE_NOTE_MS ? [{ speakerId, lateMs }] : [];
   });
-  return { frames: frames.length, sent, missed, late };
+  const direct = hosts.filter((h, i) => h !== undefined && sent[i] > 0).length;
+  return { frames: frames.length, sent, missed, late, direct };
+}
+
+/** Where one speaker's frames go when they bypass Protect. */
+interface DirectSink {
+  /** Hands one frame to the OS. Throws if an earlier frame was rejected. */
+  send(frame: Buffer): void;
+  /**
+   * Resolves once the OS has answered for every frame handed over, and throws
+   * if it rejected any. Without this a rejection of the LAST frames — or of
+   * every frame of a clip short enough to fit inside the opening burst, whose
+   * callbacks all run after the final send — would never be looked at, and a
+   * delivery that put nothing on the wire would be reported as complete.
+   */
+  settled(): Promise<void>;
+}
+
+/**
+ * Delivers frames straight to one speaker. A send the OS rejects (no route,
+ * socket closed) becomes a TalkbackError that says whether anything had gone
+ * out before it; a datagram lost on the wire is silent, like everything else
+ * about this channel.
+ */
+function directSink(udp: dgram.Socket, host: string): DirectSink {
+  let failed: Error | null = null;
+  let pending = 0;
+  let accepted = 0;
+  let idle: (() => void) | null = null;
+  const failure = (): TalkbackError =>
+    new TalkbackError(`could not send audio to the speaker at ${host}: ${failed!.message}`, accepted > 0, {
+      cause: failed,
+    });
+  return {
+    send(frame) {
+      if (failed) throw failure();
+      pending++;
+      udp.send(frame, SPEAKER_AUDIO_PORT, host, (err) => {
+        pending--;
+        if (err) failed ??= err;
+        else accepted++;
+        if (pending === 0) idle?.();
+      });
+    },
+    async settled() {
+      if (pending > 0) await new Promise<void>((resolve) => (idle = resolve));
+      if (failed) throw failure();
+    },
+  };
 }
 
 /**
@@ -373,12 +472,17 @@ async function sendFrames(session: PrivateSession, speakerId: string, frames: Bu
  * leave the NVR its arm delay after the socket opened — and closes the socket.
  * Taking the start time from the caller is what lets several speakers share
  * one clock. Returns the number of frames transmitted.
+ *
+ * With a `direct` sink the frames go to it instead and the socket carries
+ * none: it stays open only because an open session is what keeps the speaker
+ * listening, and it still ends the delivery if it closes.
  */
 async function sendOnSocket(
   ws: WebSocket,
   frames: Buffer[],
   startAt: number,
   shouldStop?: () => boolean,
+  direct?: DirectSink,
 ): Promise<number> {
   let sent = 0;
   const stopped = (): boolean => shouldStop?.() ?? false;
@@ -395,12 +499,19 @@ async function sendOnSocket(
       if (stopped() || ws.readyState !== WebSocket.OPEN) break;
       const wait = startAt + i * FRAME_MS - LEAD_MS - Date.now();
       if (wait > 0) await sleep(wait);
-      ws.send(frames[i]);
+      if (direct) {
+        direct.send(frames[i]);
+        if (i > 0 && i % DIRECT_KEEPALIVE_FRAMES === 0 && ws.readyState === WebSocket.OPEN) ws.ping();
+      } else {
+        ws.send(frames[i]);
+      }
       sent++;
     }
     // Abandoned on request: a short count, not a refusal by the speaker.
     if (stopped()) return sent;
     await sleep(TAIL_MS);
+    // Every direct frame must be accounted for before this counts as sent.
+    if (direct) await direct.settled();
     // The socket closing during the arm delay is the speaker refusing a second
     // session while it is still tearing the last one down. Nothing was sent,
     // so say that plainly instead of returning a silent zero — the caller can

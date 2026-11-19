@@ -171,6 +171,11 @@ export async function pollFirmwareOnce(adapter: ProtectAdapter): Promise<void> {
           .where(eq(schema.speakers.mac, normMac(s.mac)))
           .run();
       }
+      // Only the private bootstrap carries the address. Kept fresh here so a
+      // delivery never has to ask Protect for it at bell time.
+      if (s.mac && typeof s.host === "string" && s.host) {
+        db.update(schema.speakers).set({ host: s.host }).where(eq(schema.speakers.mac, normMac(s.mac))).run();
+      }
     }
     const version = b.nvr?.version;
     if (version) watchVersion(version, fw, b.nvr?.firmwareVersion);

@@ -51,6 +51,9 @@ export const speakers = sqliteTable("speakers", {
   volume: integer("volume"),
   micVolume: integer("mic_volume"),
   firmwareVersion: text("firmware_version"),
+  // The speaker's own LAN address as Protect knows it — where audio is sent
+  // when it goes to the speakers directly instead of through Protect's relay.
+  host: text("host"),
   lastSeenOnlineAt: integer("last_seen_online_at"),
   lastPolledAt: integer("last_polled_at"),
   raw: text("raw"), // full official-API object, JSON, for debugging
