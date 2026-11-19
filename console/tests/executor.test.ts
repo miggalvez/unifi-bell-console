@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
 import { executeClaimedRun } from "@/lib/scheduler/executor";
@@ -247,12 +247,56 @@ describe("talkback runs that reach only some speakers", () => {
   }
 
   it("all speakers: plain SUCCESS, as before", async () => {
-    streamMock.mockImplementationOnce(async (ids) => ({ frames: 314, sent: ids.map(() => 314), missed: [], late: [] }));
+    streamMock.mockImplementationOnce(async (ids) => ({ frames: 314, sent: ids.map(() => 314), missed: [], late: [], direct: 0 }));
     const id = talkbackRun([hall, office]);
     const outcome = await executeClaimedRun(fakeAdapter({}), id);
     expect(outcome.status).toBe("SUCCESS");
     expect(runRow(id).status).toBe("SUCCESS");
     expect(runRow(id).resultMessage).toBe("streamed 314/314 frames (no delivery confirmation available)");
+  });
+
+  describe("with PROTECT_TALKBACK_DIRECT on", () => {
+    beforeEach(() => {
+      process.env.PROTECT_TALKBACK_DIRECT = "true";
+      db.update(schema.speakers).set({ host: null }).run();
+    });
+    afterEach(() => {
+      delete process.env.PROTECT_TALKBACK_DIRECT;
+      db.update(schema.speakers).set({ host: null }).run();
+    });
+
+    it("hands the fan-out each speaker's address and says the audio went direct", async () => {
+      db.update(schema.speakers).set({ host: "10.0.0.1" }).where(eq(schema.speakers.mac, hall)).run();
+      db.update(schema.speakers).set({ host: "10.0.0.2" }).where(eq(schema.speakers.mac, office)).run();
+      streamMock.mockImplementationOnce(async (ids) => ({ frames: 314, sent: ids.map(() => 314), missed: [], late: [], direct: 2 }));
+      const id = talkbackRun([hall, office]);
+      await executeClaimedRun(fakeAdapter({}), id);
+      const opts = streamMock.mock.calls[0][1];
+      expect(Object.fromEntries(opts.directHosts ?? [])).toEqual({ [`spk-${hall}`]: "10.0.0.1", [`spk-${office}`]: "10.0.0.2" });
+      expect(runRow(id).resultMessage).toBe(
+        "streamed 314/314 frames directly to the speakers (no delivery confirmation available)",
+      );
+    });
+
+    it("leaves out a speaker whose address is unknown, and says how many went direct", async () => {
+      db.update(schema.speakers).set({ host: "10.0.0.1" }).where(eq(schema.speakers.mac, hall)).run();
+      streamMock.mockImplementationOnce(async (ids) => ({ frames: 314, sent: ids.map(() => 314), missed: [], late: [], direct: 1 }));
+      const id = talkbackRun([hall, office]);
+      await executeClaimedRun(fakeAdapter({}), id);
+      expect(Object.fromEntries(streamMock.mock.calls[0][1].directHosts ?? [])).toEqual({ [`spk-${hall}`]: "10.0.0.1" });
+      expect(runRow(id).resultMessage).toBe(
+        "streamed 314/314 frames (1 of 2 speakers directly) (no delivery confirmation available)",
+      );
+    });
+  });
+
+  it("without the setting, no addresses are passed even when they are known", async () => {
+    db.update(schema.speakers).set({ host: "10.0.0.1" }).where(eq(schema.speakers.mac, hall)).run();
+    streamMock.mockImplementationOnce(async (ids) => ({ frames: 314, sent: ids.map(() => 314), missed: [], late: [], direct: 0 }));
+    const id = talkbackRun([hall, office]);
+    await executeClaimedRun(fakeAdapter({}), id);
+    expect(streamMock.mock.calls[0][1].directHosts).toBeUndefined();
+    db.update(schema.speakers).set({ host: null }).run();
   });
 
   it("a speaker that started behind the others is named on an otherwise plain SUCCESS", async () => {
@@ -261,6 +305,7 @@ describe("talkback runs that reach only some speakers", () => {
       sent: ids.map(() => 314),
       missed: [],
       late: [{ speakerId: `spk-${office}`, lateMs: 2140 }],
+      direct: 0,
     }));
     const id = talkbackRun([hall, office]);
     const outcome = await executeClaimedRun(fakeAdapter({}), id);
@@ -277,7 +322,7 @@ describe("talkback runs that reach only some speakers", () => {
       missed: ids
         .filter((sid) => sid === `spk-${gym}` || sid === `spk-${lab}`)
         .map((speakerId) => ({ speakerId, partial: false, error: "talkback WS rejected: HTTP 500" })),
-      late: [],
+      late: [], direct: 0,
     }));
     const id = talkbackRun(all);
     const outcome = await executeClaimedRun(fakeAdapter({}), id);
@@ -305,7 +350,7 @@ describe("talkback runs that reach only some speakers", () => {
         { speakerId: `spk-${hall}`, partial: false, error: "talkback WS rejected: HTTP 404" },
         { speakerId: `spk-${office}`, partial: true },
       ],
-      late: [],
+      late: [], direct: 0,
     }));
     const id = talkbackRun([hall, office]);
     const outcome = await executeClaimedRun(fakeAdapter({}), id);

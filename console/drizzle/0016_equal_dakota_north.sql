@@ -1,0 +1,1 @@
+ALTER TABLE `speakers` ADD `host` text;

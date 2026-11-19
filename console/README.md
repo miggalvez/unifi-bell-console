@@ -27,6 +27,11 @@ Playback goes through UniFi Protect three ways:
   on the host. **Best-effort by nature**: the talkback channel is write-only,
   so a success means "transmitted", never "played". Good for announcements a
   human is listening to; wrong for unattended bells.
+  With `PROTECT_TALKBACK_DIRECT=true` the session is still opened through
+  Protect, but the audio frames go straight to each speaker (UDP 7004) rather
+  than through Protect's relay, which drops audio whenever Protect's main
+  thread pauses (it forces a garbage collection every five minutes). Only for
+  a console on the speakers' own network — see `.env.example`.
 
 Triggers come back the other way too: **keychain remotes** (UniFi USL fobs).
 Admins map fob buttons to console actions on the Remotes page and the console

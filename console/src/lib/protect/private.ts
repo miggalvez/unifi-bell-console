@@ -20,6 +20,8 @@ export interface PrivateSpeaker {
   type?: string;
   marketName?: string;
   firmwareVersion?: string;
+  /** The speaker's LAN address, as last reported to Protect. */
+  host?: string;
   volume?: number;
   featureFlags?: Record<string, unknown>;
   talkbackSettings?: Record<string, unknown>;

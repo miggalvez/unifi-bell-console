@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 // replace the three outside seams — ffmpeg, the Protect login, the talkback
 // WebSocket — so what is under test is how per-speaker results are reported.
 
-type Mode = "ok" | "refused" | "closes-before-audio" | "cut-off" | "errors-mid-stream";
+type Mode = "ok" | "refused" | "closes-before-audio" | "cut-off" | "errors-mid-stream" | "closes-mid-audio";
 
 const seams = vi.hoisted(() => ({
   /** How each speaker's socket behaves, keyed by speaker id. Default "ok". */
@@ -13,6 +13,13 @@ const seams = vi.hoisted(() => ({
   openDelay: new Map<string, number>(),
   /** When each speaker was sent its first frame (epoch ms). */
   firstSendAt: new Map<string, number>(),
+  /** Frames sent THROUGH the talkback socket, per speaker. */
+  wsSends: new Map<string, number>(),
+  /** Keepalive pings on the talkback socket, per speaker. */
+  pings: new Map<string, number>(),
+  /** Datagrams sent straight to a speaker's address. */
+  udp: [] as { host: string; port: number; bytes: number; at: number }[],
+  udpSocketsClosed: 0,
   /** Frames the fake ffmpeg "encodes". Few enough to send inside LEAD_MS. */
   frames: 5,
   /** A valid ADTS stream of n minimal frames (7-byte header + 2 bytes). */
@@ -72,11 +79,18 @@ vi.mock("ws", async () => {
         this.emit("open");
         // The speaker hangs up during the arm delay, before any audio.
         if (this.mode === "closes-before-audio") this.readyState = 3;
+        // Protect drops the session partway through the audio.
+        if (this.mode === "closes-mid-audio") setTimeout(() => (this.readyState = 3), 400 + 250);
       }, seams.openDelay.get(this.speaker) ?? 0);
+    }
+
+    ping(): void {
+      seams.pings.set(this.speaker, (seams.pings.get(this.speaker) ?? 0) + 1);
     }
 
     send(): void {
       if (this.sent === 0) seams.firstSendAt.set(this.speaker, Date.now());
+      seams.wsSends.set(this.speaker, (seams.wsSends.get(this.speaker) ?? 0) + 1);
       this.sent++;
       if (this.mode === "cut-off" && this.sent >= 2) this.readyState = 3;
       // The socket fails outright after two frames are already on their way.
@@ -90,13 +104,32 @@ vi.mock("ws", async () => {
   return { default: FakeSocket };
 });
 
-const { streamToSpeakers, streamLoopToSpeakers, TalkbackError, ARM_MS, SYNC_WAIT_MS } = await import(
+vi.mock("node:dgram", () => ({
+  default: {
+    createSocket: () => ({
+      on() {},
+      send(frame: Buffer, port: number, host: string, cb?: (err: Error | null) => void) {
+        seams.udp.push({ host, port, bytes: frame.length, at: Date.now() });
+        cb?.(null);
+      },
+      close() {
+        seams.udpSocketsClosed++;
+      },
+    }),
+  },
+}));
+
+const { streamToSpeakers, streamLoopToSpeakers, TalkbackError, ARM_MS, SYNC_WAIT_MS, SPEAKER_AUDIO_PORT } = await import(
   "@/lib/protect/talkback"
 );
 
 function setModes(modes: Record<string, Mode>, openDelay: Record<string, number> = {}): void {
   seams.openDelay.clear();
   seams.firstSendAt.clear();
+  seams.wsSends.clear();
+  seams.pings.clear();
+  seams.udp.length = 0;
+  seams.udpSocketsClosed = 0;
   for (const [id, ms] of Object.entries(openDelay)) seams.openDelay.set(id, ms);
   seams.modes.clear();
   for (const [id, mode] of Object.entries(modes)) seams.modes.set(id, mode);
@@ -296,6 +329,91 @@ describe("streamLoopToSpeakers starts every speaker's first cycle on one clock",
       // Hall started one arm delay after gym's refusal came back — not after
       // the sync window, and not after gym's retry.
       expect(seams.firstSendAt.get("hall")! - t0).toBeLessThan(100 + ARM_MS + 150);
+    },
+    12_000,
+  );
+});
+
+describe("streamToSpeakers can send the audio straight to the speakers", () => {
+  // Protect relays talkback audio on its main thread and stops that thread
+  // for up to a couple of seconds every five minutes. Sent directly, the same
+  // frames never pass through it; the session is still opened through Protect.
+  const to = (host: string) => seams.udp.filter((d) => d.host === host);
+  const wsTotal = () => [...seams.wsSends.values()].reduce((a, b) => a + b, 0);
+
+  it("every frame goes to each speaker's own address, and none through Protect", async () => {
+    setModes({ hall: "ok", gym: "ok" }, { hall: 0, gym: 150 });
+    const r = await streamToSpeakers(["hall", "gym"], {
+      beeps: 1,
+      directHosts: new Map([["hall", "10.0.0.1"], ["gym", "10.0.0.2"]]),
+    });
+    expect(to("10.0.0.1")).toHaveLength(5);
+    expect(to("10.0.0.2")).toHaveLength(5);
+    expect(seams.udp.every((d) => d.port === SPEAKER_AUDIO_PORT && d.bytes === 9)).toBe(true);
+    expect(wsTotal()).toBe(0);
+    expect(r.sent).toEqual([5, 5]);
+    expect(r.missed).toEqual([]);
+    expect(r.direct).toBe(2);
+    // Still one clock: both speakers' first datagrams leave together.
+    expect(Math.abs(to("10.0.0.1")[0].at - to("10.0.0.2")[0].at)).toBeLessThan(40);
+    expect(seams.udpSocketsClosed).toBe(1);
+  });
+
+  it("a speaker with no known address is relayed through Protect — never both ways", async () => {
+    setModes({ hall: "ok", gym: "ok" });
+    const r = await streamToSpeakers(["hall", "gym"], { beeps: 1, directHosts: new Map([["hall", "10.0.0.1"]]) });
+    expect(to("10.0.0.1")).toHaveLength(5);
+    expect(seams.wsSends.get("hall")).toBeUndefined();
+    expect(seams.wsSends.get("gym")).toBe(5);
+    expect(seams.udp).toHaveLength(5);
+    expect(r.sent).toEqual([5, 5]);
+    expect(r.direct).toBe(1);
+  });
+
+  it("something that is not an IPv4 address is not trusted as one", async () => {
+    setModes({ hall: "ok" });
+    const r = await streamToSpeakers(["hall"], { beeps: 1, directHosts: new Map([["hall", "speaker.local"]]) });
+    expect(seams.udp).toHaveLength(0);
+    expect(seams.wsSends.get("hall")).toBe(5);
+    expect(r.direct).toBe(0);
+  });
+
+  it("a speaker whose session Protect refused is sent nothing at all", async () => {
+    setModes({ hall: "ok", gym: "refused" });
+    const r = await streamToSpeakers(["hall", "gym"], {
+      beeps: 1,
+      directHosts: new Map([["hall", "10.0.0.1"], ["gym", "10.0.0.2"]]),
+    });
+    expect(to("10.0.0.2")).toHaveLength(0);
+    expect(r.sent).toEqual([5, 0]);
+    expect(r.missed).toEqual([{ speakerId: "gym", partial: false, error: expect.stringMatching(/HTTP 500/) }]);
+    expect(r.direct).toBe(1);
+  });
+
+  it("stops sending when the session closes: an unarmed speaker would not play it anyway", async () => {
+    setModes({ hall: "closes-mid-audio" });
+    seams.frames = 60;
+    const r = await streamToSpeakers(["hall"], { beeps: 1, directHosts: new Map([["hall", "10.0.0.1"]]) }).finally(
+      () => (seams.frames = 5),
+    );
+    expect(r.sent[0]).toBeGreaterThan(0);
+    expect(r.sent[0]).toBeLessThan(60);
+    expect(to("10.0.0.1")).toHaveLength(r.sent[0]);
+    expect(r.missed).toEqual([{ speakerId: "hall", partial: true, error: undefined }]);
+  });
+
+  it(
+    "keeps the silent session alive with a ping on anything longer than five seconds",
+    async () => {
+      setModes({ hall: "ok" });
+      seams.frames = 130; // about 5.5s — a real bell is longer still
+      const r = await streamToSpeakers(["hall"], { beeps: 1, directHosts: new Map([["hall", "10.0.0.1"]]) }).finally(
+        () => (seams.frames = 5),
+      );
+      expect(r.sent).toEqual([130]);
+      expect(to("10.0.0.1")).toHaveLength(130);
+      expect(seams.pings.get("hall")).toBe(1);
+      expect(wsTotal()).toBe(0);
     },
     12_000,
   );
