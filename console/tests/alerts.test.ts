@@ -5,7 +5,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 vi.mock("@/lib/protect/talkback", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/protect/talkback")>()),
   streamToSpeakers: vi.fn(async (ids: string[]) => ({ frames: 120, sent: ids.map(() => 120), missed: [], late: [], direct: 0 })),
-  streamLoopToSpeakers: vi.fn(async () => ({ cycles: 4, frames: 400, reconnects: 0, ended: "until" as const, missed: [] })),
+  streamLoopToSpeakers: vi.fn(async () => ({ cycles: 4, frames: 400, reconnects: 0, ended: "until" as const, missed: [], direct: 0 })),
 }));
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
@@ -262,10 +262,39 @@ describe("a recorded alert streams continuously", () => {
     return streamLoopToSpeakers as unknown as ReturnType<typeof vi.fn>;
   }
 
+  it("sends a recorded alert straight to the speakers only when its own switch is on", async () => {
+    const mock = await loopMock();
+    db.update(schema.speakers).set({ host: "10.0.0.1" }).run();
+    const rec = seedRecordedAlertCue("Direct siren");
+    const hostsPassed = async (): Promise<unknown> => {
+      mock.mockClear();
+      mock.mockImplementation(async () => ({ cycles: 2, frames: 200, reconnects: 0, ended: "until" as const, missed: [], direct: 1 }));
+      startAlert({ cueId: rec, userId, repeatSeconds: 30, maxMinutes: 5 });
+      expect(await tickAlert(fakeAdapter())).toBe("played");
+      await alertStreamSettled();
+      stopAlert(userId);
+      return (mock.mock.calls[0][1] as { directHosts?: Map<string, string> }).directHosts;
+    };
+    try {
+      // The bell switch alone must not move the emergency path.
+      process.env.PROTECT_TALKBACK_DIRECT = "true";
+      expect(await hostsPassed()).toBeUndefined();
+      process.env.PROTECT_TALKBACK_DIRECT_LOOPS = "true";
+      const hosts = (await hostsPassed()) as Map<string, string>;
+      expect([...hosts.values()]).toContain("10.0.0.1");
+      const run = db.select().from(schema.scheduledRuns).all().at(-1)!;
+      expect(run.resultMessage).toMatch(/sounded 2× as one continuous stream \(1 of \d+ speakers directly\)|directly to the speakers/);
+    } finally {
+      delete process.env.PROTECT_TALKBACK_DIRECT;
+      delete process.env.PROTECT_TALKBACK_DIRECT_LOOPS;
+      db.update(schema.speakers).set({ host: null }).run();
+    }
+  });
+
   it("plays as ONE looped session with the repeat gap rendered in-stream", async () => {
     const mock = await loopMock();
     mock.mockClear();
-    mock.mockImplementation(async () => ({ cycles: 7, frames: 700, reconnects: 1, ended: "until" as const, missed: [] }));
+    mock.mockImplementation(async () => ({ cycles: 7, frames: 700, reconnects: 1, ended: "until" as const, missed: [], direct: 0 }));
 
     const rec = seedRecordedAlertCue("Siren");
     startAlert({ cueId: rec, userId, repeatSeconds: 30, maxMinutes: 5 });
@@ -314,7 +343,7 @@ describe("a recorded alert streams continuously", () => {
     // actually silence the speaker instead of letting 20s of audio finish.
     expect(captured!.shouldStop()).toBe(true);
 
-    finish({ cycles: 2, frames: 200, reconnects: 0, ended: "stopped", missed: [] });
+    finish({ cycles: 2, frames: 200, reconnects: 0, ended: "stopped", missed: [], direct: 0 });
     await alertStreamSettled();
   });
 
@@ -325,7 +354,7 @@ describe("a recorded alert streams continuously", () => {
       .mockImplementationOnce(async () => {
         throw new Error("socket kept dying");
       })
-      .mockImplementation(async () => ({ cycles: 1, frames: 100, reconnects: 0, ended: "until" as const, missed: [] }));
+      .mockImplementation(async () => ({ cycles: 1, frames: 100, reconnects: 0, ended: "until" as const, missed: [], direct: 0 }));
 
     const rec = seedRecordedAlertCue("Siren 3");
     startAlert({ cueId: rec, userId, maxMinutes: 5 });

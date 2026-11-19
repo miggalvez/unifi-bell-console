@@ -31,7 +31,10 @@ Playback goes through UniFi Protect three ways:
   Protect, but the audio frames go straight to each speaker (UDP 7004) rather
   than through Protect's relay, which drops audio whenever Protect's main
   thread pauses (it forces a garbage collection every five minutes). Only for
-  a console on the speakers' own network — see `.env.example`.
+  a console on the speakers' own network — see `.env.example`. Repeating
+  alerts and drill sounds have their own switch,
+  `PROTECT_TALKBACK_DIRECT_LOOPS`, to be turned on after a practice drill has
+  been heard playing that way.
 
 Triggers come back the other way too: **keychain remotes** (UniFi USL fobs).
 Admins map fob buttons to console actions on the Remotes page and the console

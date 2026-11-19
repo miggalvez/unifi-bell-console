@@ -326,11 +326,13 @@ export function describeLate(late: { speakerId: string; lateMs: number }[]): str
 
 /**
  * Each target speaker's own address, when this console is set to send audio
- * to the speakers directly (PROTECT_TALKBACK_DIRECT). A speaker whose address
- * is not known yet is simply left out, and goes through Protect as before.
+ * to the speakers directly: PROTECT_TALKBACK_DIRECT for one-shot deliveries
+ * (the default here), PROTECT_TALKBACK_DIRECT_LOOPS for repeating alerts and
+ * drill sounds, which pass their own switch. A speaker whose address is not
+ * known yet is simply left out, and goes through Protect as before.
  */
-function directHostsFor(ids: string[]): Map<string, string> | undefined {
-  if (!env.talkbackDirect || ids.length === 0) return undefined;
+export function directHostsFor(ids: string[], enabled = env.talkbackDirect): Map<string, string> | undefined {
+  if (!enabled || ids.length === 0) return undefined;
   const rows = db
     .select({ id: schema.speakers.id, host: schema.speakers.host })
     .from(schema.speakers)
@@ -342,8 +344,8 @@ function directHostsFor(ids: string[]): Map<string, string> | undefined {
 }
 
 /** Says which way the audio travelled — it decides what a later skip can be blamed on. */
-function describeDirect(direct: number, targeted: number): string {
-  if (direct === 0) return "";
+export function describeDirect(direct: number | undefined, targeted: number): string {
+  if (!direct) return "";
   return direct >= targeted ? " directly to the speakers" : ` (${direct} of ${targeted} speakers directly)`;
 }
 

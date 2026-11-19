@@ -39,10 +39,13 @@ import {
   executeClaimedRun,
   audioPathForCue,
   audioPathsForCue,
+  describeDirect,
   describeShortfall,
+  directHostsFor,
   wasPlayed,
 } from "@/lib/scheduler/executor";
 import { isTalkback } from "@/lib/delivery";
+import { env } from "@/env";
 import { localDateTimeParts } from "@/lib/scheduler/time";
 import { resolveTargetMacs } from "@/lib/zones";
 import type { ProtectAdapter } from "@/lib/protect/adapter";
@@ -513,6 +516,7 @@ function startPhaseStream(
       gapSeconds: 0,
       until: endsAt,
       shouldStop: () => !stillThisPhase(),
+      directHosts: directHostsFor(ids, env.talkbackDirectLoops),
     });
     // Rule 1 holds inside the loop too: zero completed cycles on a stream that
     // ran to its deadline means the announcement never made it out.
@@ -525,6 +529,7 @@ function startPhaseStream(
       r.missed.length > 0 ? "PARTIAL" : "SUCCESS",
       (r.missed.length > 0 ? `${describeShortfall(r.missed, ids.length)} — ` : "") +
         `sounded ${r.cycles}× as one continuous stream` +
+        describeDirect(r.direct, ids.length) +
         (r.reconnects > 0 ? ` (${r.reconnects} reconnect${r.reconnects > 1 ? "s" : ""})` : "") +
         (r.ended === "stopped" ? " — stopped" : ""),
     );

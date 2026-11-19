@@ -15,7 +15,15 @@ import { writeAudit } from "@/lib/audit";
 import { TALKBACK_RECOVERY_MS, estimateDurationMs, forceClaimSpeaker, releaseSpeaker } from "@/lib/speaker-lock";
 import { streamLoopToSpeakers } from "@/lib/protect/talkback";
 import { isTalkback } from "@/lib/delivery";
-import { executeClaimedRun, audioPathForCue, audioPathsForCue, describeShortfall } from "@/lib/scheduler/executor";
+import {
+  executeClaimedRun,
+  audioPathForCue,
+  audioPathsForCue,
+  describeDirect,
+  describeShortfall,
+  directHostsFor,
+} from "@/lib/scheduler/executor";
+import { env } from "@/env";
 import { localDateTimeParts } from "@/lib/scheduler/time";
 import { resolveTargetMacs } from "@/lib/zones";
 import { inArray } from "drizzle-orm";
@@ -234,6 +242,7 @@ function startAlertStream(cue: typeof schema.soundCues.$inferSelect, state: Syst
       gapSeconds,
       until,
       shouldStop: () => !stillThisAlert(),
+      directHosts: directHostsFor(ids, env.talkbackDirectLoops),
     });
     // An alert that reached only some rooms names the rest, so someone can go
     // and tell them in person.
@@ -241,6 +250,7 @@ function startAlertStream(cue: typeof schema.soundCues.$inferSelect, state: Syst
       r.missed.length > 0 ? "PARTIAL" : "SUCCESS",
       (r.missed.length > 0 ? `${describeShortfall(r.missed, ids.length)} — ` : "") +
         `sounded ${r.cycles}× as one continuous stream` +
+        describeDirect(r.direct, ids.length) +
         (r.reconnects > 0 ? ` (${r.reconnects} reconnect${r.reconnects > 1 ? "s" : ""})` : "") +
         (r.ended === "stopped" ? " — stopped" : ""),
     );

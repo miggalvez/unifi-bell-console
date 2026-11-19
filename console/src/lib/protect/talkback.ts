@@ -566,6 +566,14 @@ export interface LoopOptions {
    * speaker, which one-shot deliveries can never do.
    */
   shouldStop: () => boolean;
+  /**
+   * Speaker id → that speaker's own LAN address; same meaning as
+   * StreamOptions.directHosts. A looped stream lasts minutes, so Protect's
+   * five-minute pause is certain to land inside it; sent directly, the audio
+   * is not touched by it. If the OS refuses a direct send, that speaker falls
+   * back to the relay for the rest of the stream rather than going quiet.
+   */
+  directHosts?: ReadonlyMap<string, string>;
   ffmpegPath?: string;
 }
 
@@ -577,6 +585,8 @@ export interface LoopResult {
   ended: "until" | "stopped";
   /** Speakers whose loop gave up while others kept sounding. */
   missed: SpeakerShortfall[];
+  /** How many speakers were still being sent their audio directly at the end. */
+  direct: number;
 }
 
 /** A connection that dies this many times without completing a cycle is dead. */
@@ -610,9 +620,23 @@ export async function streamLoopToSpeakers(speakerIds: string[], opts: LoopOptio
   if (cycleFrames.length === 0) throw new TalkbackError("no audio frames produced by ffmpeg", false);
 
   const gate = startGate(speakerIds.length, ARM_MS);
+  const hosts = speakerIds.map((id) => {
+    const host = opts.directHosts?.get(id);
+    return host !== undefined && isIPv4(host) ? host : undefined;
+  });
+  const udp = hosts.some((h) => h !== undefined) ? dgram.createSocket("udp4") : null;
+  udp?.on("error", () => {});
   const results = await Promise.allSettled(
-    speakerIds.map((id) => loopOneSpeaker(session, id, cycleFrames, gapFrames, opts, gate)),
+    speakerIds.map((id, i) => {
+      const host = hosts[i];
+      return loopOneSpeaker(session, id, cycleFrames, gapFrames, opts, gate, udp && host ? { udp, host } : undefined);
+    }),
   );
+  try {
+    udp?.close();
+  } catch {
+    /* already closed */
+  }
   const ok = results.filter((r): r is PromiseFulfilledResult<LoopResult> => r.status === "fulfilled");
   if (ok.length === 0) throw everySpeakerFailed(results);
   const missed: SpeakerShortfall[] = [];
@@ -626,7 +650,12 @@ export async function streamLoopToSpeakers(speakerIds: string[], opts: LoopOptio
     });
   });
   const best = ok.map((r) => r.value).sort((a, b) => b.frames - a.frames)[0];
-  return { ...best, reconnects: ok.reduce((a, r) => a + r.value.reconnects, 0), missed };
+  return {
+    ...best,
+    reconnects: ok.reduce((a, r) => a + r.value.reconnects, 0),
+    missed,
+    direct: ok.reduce((a, r) => a + r.value.direct, 0),
+  };
 }
 
 async function loopOneSpeaker(
@@ -636,7 +665,11 @@ async function loopOneSpeaker(
   gapFrames: Buffer[],
   opts: LoopOptions,
   gate: ReturnType<typeof startGate>,
+  directTo?: { udp: dgram.Socket; host: string },
 ): Promise<LoopResult> {
+  // Direct until the OS refuses a send; from then on this speaker is relayed.
+  // An alert that has lost its direct route must keep sounding, not stop.
+  let sink: DirectSink | null = directTo ? directSink(directTo.udp, directTo.host) : null;
   let cycles = 0;
   let frames = 0;
   let reconnects = 0;
@@ -701,7 +734,20 @@ async function loopOneSpeaker(
         if (ws.readyState !== WebSocket.OPEN) return false;
         const wait = t0 + i * FRAME_MS - LEAD_MS - Date.now();
         if (wait > 0) await sleep(wait);
-        ws.send(frame);
+        if (sink) {
+          try {
+            sink.send(frame);
+            // The socket carries nothing while audio goes direct; keep it alive.
+            if (i > 0 && i % DIRECT_KEEPALIVE_FRAMES === 0 && ws.readyState === WebSocket.OPEN) ws.ping();
+          } catch {
+            // An earlier direct frame was refused. This one, and the rest, go
+            // through Protect — never both ways for the same frame.
+            sink = null;
+            ws.send(frame);
+          }
+        } else {
+          ws.send(frame);
+        }
         i++;
         frames++;
         return true;
@@ -769,5 +815,5 @@ async function loopOneSpeaker(
   // Zero cycles with a clean exit means the deadline or an abort arrived
   // before anything went out — a caller decision, not an error. Refusals and
   // dead sockets already threw above via the consecutive-failure cap.
-  return { cycles, frames, reconnects, ended, missed: [] };
+  return { cycles, frames, reconnects, ended, missed: [], direct: sink && frames > 0 ? 1 : 0 };
 }
