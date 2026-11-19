@@ -240,19 +240,50 @@ export async function streamToSpeakers(speakerIds: string[], opts: StreamOptions
   return { frames: frames.length, sent, missed, late, direct };
 }
 
+/** Where one speaker's frames go when they bypass Protect. */
+interface DirectSink {
+  /** Hands one frame to the OS. Throws if an earlier frame was rejected. */
+  send(frame: Buffer): void;
+  /**
+   * Resolves once the OS has answered for every frame handed over, and throws
+   * if it rejected any. Without this a rejection of the LAST frames — or of
+   * every frame of a clip short enough to fit inside the opening burst, whose
+   * callbacks all run after the final send — would never be looked at, and a
+   * delivery that put nothing on the wire would be reported as complete.
+   */
+  settled(): Promise<void>;
+}
+
 /**
  * Delivers frames straight to one speaker. A send the OS rejects (no route,
- * socket closed) surfaces on the NEXT frame, as a throw, so the caller's
- * ordinary failure handling sees it; a datagram lost on the wire is silent,
- * like everything else about this channel.
+ * socket closed) becomes a TalkbackError that says whether anything had gone
+ * out before it; a datagram lost on the wire is silent, like everything else
+ * about this channel.
  */
-function directSink(udp: dgram.Socket, host: string): (frame: Buffer) => void {
+function directSink(udp: dgram.Socket, host: string): DirectSink {
   let failed: Error | null = null;
-  return (frame) => {
-    if (failed) throw failed;
-    udp.send(frame, SPEAKER_AUDIO_PORT, host, (err) => {
-      if (err) failed = err;
+  let pending = 0;
+  let accepted = 0;
+  let idle: (() => void) | null = null;
+  const failure = (): TalkbackError =>
+    new TalkbackError(`could not send audio to the speaker at ${host}: ${failed!.message}`, accepted > 0, {
+      cause: failed,
     });
+  return {
+    send(frame) {
+      if (failed) throw failure();
+      pending++;
+      udp.send(frame, SPEAKER_AUDIO_PORT, host, (err) => {
+        pending--;
+        if (err) failed ??= err;
+        else accepted++;
+        if (pending === 0) idle?.();
+      });
+    },
+    async settled() {
+      if (pending > 0) await new Promise<void>((resolve) => (idle = resolve));
+      if (failed) throw failure();
+    },
   };
 }
 
@@ -451,7 +482,7 @@ async function sendOnSocket(
   frames: Buffer[],
   startAt: number,
   shouldStop?: () => boolean,
-  direct?: (frame: Buffer) => void,
+  direct?: DirectSink,
 ): Promise<number> {
   let sent = 0;
   const stopped = (): boolean => shouldStop?.() ?? false;
@@ -469,7 +500,7 @@ async function sendOnSocket(
       const wait = startAt + i * FRAME_MS - LEAD_MS - Date.now();
       if (wait > 0) await sleep(wait);
       if (direct) {
-        direct(frames[i]);
+        direct.send(frames[i]);
         if (i > 0 && i % DIRECT_KEEPALIVE_FRAMES === 0 && ws.readyState === WebSocket.OPEN) ws.ping();
       } else {
         ws.send(frames[i]);
@@ -479,6 +510,8 @@ async function sendOnSocket(
     // Abandoned on request: a short count, not a refusal by the speaker.
     if (stopped()) return sent;
     await sleep(TAIL_MS);
+    // Every direct frame must be accounted for before this counts as sent.
+    if (direct) await direct.settled();
     // The socket closing during the arm delay is the speaker refusing a second
     // session while it is still tearing the last one down. Nothing was sent,
     // so say that plainly instead of returning a silent zero — the caller can

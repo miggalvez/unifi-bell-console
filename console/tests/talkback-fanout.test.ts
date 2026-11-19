@@ -20,6 +20,8 @@ const seams = vi.hoisted(() => ({
   /** Datagrams sent straight to a speaker's address. */
   udp: [] as { host: string; port: number; bytes: number; at: number }[],
   udpSocketsClosed: 0,
+  /** Hosts the OS refuses to send to: host → how many datagrams it accepts first. */
+  udpRejectAfter: new Map<string, number>(),
   /** Frames the fake ffmpeg "encodes". Few enough to send inside LEAD_MS. */
   frames: 5,
   /** A valid ADTS stream of n minimal frames (7-byte header + 2 bytes). */
@@ -109,8 +111,11 @@ vi.mock("node:dgram", () => ({
     createSocket: () => ({
       on() {},
       send(frame: Buffer, port: number, host: string, cb?: (err: Error | null) => void) {
+        const before = seams.udp.filter((d) => d.host === host).length;
         seams.udp.push({ host, port, bytes: frame.length, at: Date.now() });
-        cb?.(null);
+        const limit = seams.udpRejectAfter.get(host);
+        // Like the real socket, the verdict arrives after send() has returned.
+        setImmediate(() => cb?.(limit !== undefined && before >= limit ? new Error("send EHOSTUNREACH") : null));
       },
       close() {
         seams.udpSocketsClosed++;
@@ -130,6 +135,7 @@ function setModes(modes: Record<string, Mode>, openDelay: Record<string, number>
   seams.pings.clear();
   seams.udp.length = 0;
   seams.udpSocketsClosed = 0;
+  seams.udpRejectAfter.clear();
   for (const [id, ms] of Object.entries(openDelay)) seams.openDelay.set(id, ms);
   seams.modes.clear();
   for (const [id, mode] of Object.entries(modes)) seams.modes.set(id, mode);
@@ -417,4 +423,43 @@ describe("streamToSpeakers can send the audio straight to the speakers", () => {
     },
     12_000,
   );
+});
+
+describe("a direct send the OS rejects is never reported as delivered", () => {
+  // The rejection arrives after send() returns. A clip short enough to fit in
+  // the opening burst has handed over every frame before the first verdict.
+  it("short clip, every datagram rejected: fails, and says nothing went out", async () => {
+    setModes({ hall: "ok" });
+    seams.udpRejectAfter.set("10.0.0.1", 0);
+    const err = await streamToSpeakers(["hall"], { beeps: 1, directHosts: new Map([["hall", "10.0.0.1"]]) }).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(TalkbackError);
+    expect((err as InstanceType<typeof TalkbackError>).transmitted).toBe(false);
+    expect((err as InstanceType<typeof TalkbackError>).retryable).toBe(false);
+    expect((err as Error).message).toMatch(/10\.0\.0\.1.*EHOSTUNREACH/);
+  });
+
+  it("only the final frame rejected: still a shortfall, marked partial", async () => {
+    setModes({ hall: "ok", gym: "ok" });
+    seams.udpRejectAfter.set("10.0.0.2", 4); // accepts four of five
+    const r = await streamToSpeakers(["hall", "gym"], {
+      beeps: 1,
+      directHosts: new Map([["hall", "10.0.0.1"], ["gym", "10.0.0.2"]]),
+    });
+    expect(r.sent).toEqual([5, 0]);
+    expect(r.missed).toEqual([{ speakerId: "gym", partial: true, error: expect.stringMatching(/EHOSTUNREACH/) }]);
+    expect(r.direct).toBe(1);
+  });
+
+  it("one unreachable speaker does not sink the ones that were reached", async () => {
+    setModes({ hall: "ok", gym: "ok" });
+    seams.udpRejectAfter.set("10.0.0.2", 0);
+    const r = await streamToSpeakers(["hall", "gym"], {
+      beeps: 1,
+      directHosts: new Map([["hall", "10.0.0.1"], ["gym", "10.0.0.2"]]),
+    });
+    expect(r.sent).toEqual([5, 0]);
+    expect(r.missed).toEqual([{ speakerId: "gym", partial: false, error: expect.stringMatching(/10\.0\.0\.2/) }]);
+  });
 });
