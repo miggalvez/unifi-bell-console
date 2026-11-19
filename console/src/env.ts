@@ -61,6 +61,14 @@ export const env = {
   get talkbackDirect() {
     return process.env.PROTECT_TALKBACK_DIRECT === "true";
   },
+  /**
+   * The same, for repeating alerts and drill sounds. Its own switch because
+   * those are the emergency path: turn it on only after hearing a full drill
+   * play this way.
+   */
+  get talkbackDirectLoops() {
+    return process.env.PROTECT_TALKBACK_DIRECT_LOOPS === "true";
+  },
   get ffmpegPath() {
     return process.env.FFMPEG_PATH ?? "ffmpeg";
   },

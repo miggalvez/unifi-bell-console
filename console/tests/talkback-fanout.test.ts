@@ -463,3 +463,91 @@ describe("a direct send the OS rejects is never reported as delivered", () => {
     expect(r.missed).toEqual([{ speakerId: "gym", partial: false, error: expect.stringMatching(/10\.0\.0\.2/) }]);
   });
 });
+
+describe("streamLoopToSpeakers can send the audio straight to the speakers", () => {
+  const to = (host: string) => seams.udp.filter((d) => d.host === host);
+  const loop = (ids: string[], o: { until: number; directHosts?: Map<string, string> }) =>
+    streamLoopToSpeakers(ids, { files: ["a.mp3"], shouldStop: () => false, ...o });
+
+  it("every frame of every cycle goes direct, none through Protect, and they start together", async () => {
+    setModes({ hall: "ok", gym: "ok" }, { hall: 0, gym: 150 });
+    const r = await loop(["hall", "gym"], {
+      until: Date.now() + 150 + ARM_MS + 400,
+      directHosts: new Map([["hall", "10.0.0.1"], ["gym", "10.0.0.2"]]),
+    });
+    expect(to("10.0.0.1").length).toBeGreaterThan(5);
+    expect(to("10.0.0.1").length).toBe(to("10.0.0.2").length);
+    expect([...seams.wsSends.values()].reduce((a, b) => a + b, 0)).toBe(0);
+    expect(Math.abs(to("10.0.0.1")[0].at - to("10.0.0.2")[0].at)).toBeLessThan(40);
+    expect(r.cycles).toBeGreaterThan(0);
+    expect(r.direct).toBe(2);
+    expect(seams.udpSocketsClosed).toBe(1);
+  });
+
+  it("a speaker with no known address is relayed while the others go direct", async () => {
+    setModes({ hall: "ok", gym: "ok" });
+    const r = await loop(["hall", "gym"], { until: Date.now() + ARM_MS + 300, directHosts: new Map([["hall", "10.0.0.1"]]) });
+    expect(to("10.0.0.1").length).toBeGreaterThan(0);
+    expect(seams.wsSends.get("hall")).toBeUndefined();
+    expect(seams.wsSends.get("gym")).toBeGreaterThan(0);
+    expect(r.direct).toBe(1);
+  });
+
+  it("if the OS refuses a direct send, that speaker carries on through Protect instead of going quiet", async () => {
+    setModes({ hall: "ok" });
+    seams.udpRejectAfter.set("10.0.0.1", 3); // the fourth datagram is refused
+    const r = await loop(["hall"], { until: Date.now() + ARM_MS + 500, directHosts: new Map([["hall", "10.0.0.1"]]) });
+    // Direct stops soon after the refusal is known; the relay takes over.
+    expect(to("10.0.0.1").length).toBeLessThan(30);
+    expect(seams.wsSends.get("hall")).toBeGreaterThan(0);
+    expect(r.cycles).toBeGreaterThan(0);
+    expect(r.direct).toBe(0);
+    expect(r.missed).toEqual([]);
+  });
+
+  it(
+    "pings the silent session about every five seconds",
+    async () => {
+      setModes({ hall: "ok" });
+      await loop(["hall"], { until: Date.now() + ARM_MS + 5_400, directHosts: new Map([["hall", "10.0.0.1"]]) });
+      expect(seams.pings.get("hall")).toBeGreaterThanOrEqual(1);
+      expect(seams.wsSends.get("hall")).toBeUndefined();
+    },
+    12_000,
+  );
+});
+
+describe("a looped direct send the OS rejects at the very end is not reported as clean", () => {
+  // Mid-stream, a refusal surfaces on the next frame and the speaker moves to
+  // the relay. At the end there is no next frame: the loop has to look.
+  const stopAfter = (host: string, n: number) => () => seams.udp.filter((d) => d.host === host).length >= n;
+
+  it("every datagram refused and nothing after them: the speaker is a failure, not a success", async () => {
+    setModes({ hall: "ok" });
+    seams.udpRejectAfter.set("10.0.0.1", 0);
+    const err = await streamLoopToSpeakers(["hall"], {
+      files: ["a.mp3"],
+      until: Date.now() + 60_000,
+      shouldStop: stopAfter("10.0.0.1", 5), // stopped inside the opening burst, before any verdict
+      directHosts: new Map([["hall", "10.0.0.1"]]),
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(TalkbackError);
+    expect((err as InstanceType<typeof TalkbackError>).transmitted).toBe(false);
+    expect((err as Error).message).toMatch(/10\.0\.0\.1.*EHOSTUNREACH/);
+    expect(seams.wsSends.get("hall")).toBeUndefined();
+  });
+
+  it("only the last datagram refused: named as a shortfall while the other speaker's run stands", async () => {
+    setModes({ hall: "ok", gym: "ok" });
+    seams.udpRejectAfter.set("10.0.0.2", 4); // accepts four, refuses the fifth and last
+    const r = await streamLoopToSpeakers(["hall", "gym"], {
+      files: ["a.mp3"],
+      until: Date.now() + 60_000,
+      shouldStop: stopAfter("10.0.0.2", 5),
+      directHosts: new Map([["hall", "10.0.0.1"], ["gym", "10.0.0.2"]]),
+    });
+    expect(r.missed).toEqual([{ speakerId: "gym", partial: true, error: expect.stringMatching(/10\.0\.0\.2.*EHOSTUNREACH/) }]);
+    expect(r.direct).toBe(1);
+    expect(r.ended).toBe("stopped");
+  });
+});

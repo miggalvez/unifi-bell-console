@@ -40,7 +40,7 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/lib/protect/talkback", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/protect/talkback")>()),
   streamToSpeakers: vi.fn(async (ids: string[]) => ({ frames: 120, sent: ids.map(() => 120), missed: [], late: [], direct: 0 })),
-  streamLoopToSpeakers: vi.fn(async () => ({ cycles: 5, frames: 500, reconnects: 0, ended: "until" as const, missed: [] })),
+  streamLoopToSpeakers: vi.fn(async () => ({ cycles: 5, frames: 500, reconnects: 0, ended: "until" as const, missed: [], direct: 0 })),
 }));
 
 const fakeAdapter = (): ProtectAdapter => fakeProtectAdapter();
@@ -762,7 +762,7 @@ describe("a repeating recorded phase streams continuously", () => {
   it("plays the whole phase as ONE looped session, then advances", async () => {
     const mock = await loopMock();
     mock.mockClear();
-    mock.mockImplementation(async () => ({ cycles: 9, frames: 900, reconnects: 0, ended: "until" as const, missed: [] }));
+    mock.mockImplementation(async () => ({ cycles: 9, frames: 900, reconnects: 0, ended: "until" as const, missed: [], direct: 0 }));
 
     const recTag = seedRecordedCue("Loop tag");
     setSetting("drillPreambleCueId", recTag);
@@ -821,7 +821,7 @@ describe("a repeating recorded phase streams continuously", () => {
     stopDrill(userId);
     expect(captured!.shouldStop()).toBe(true); // the frame loop sees this within ~43ms
 
-    finish({ cycles: 1, frames: 100, reconnects: 0, ended: "stopped", missed: [] });
+    finish({ cycles: 1, frames: 100, reconnects: 0, ended: "stopped", missed: [], direct: 0 });
     await drillStreamSettled();
     setSetting("drillPreambleCueId", null);
   });
@@ -829,7 +829,7 @@ describe("a repeating recorded phase streams continuously", () => {
   it("resumes the stream after a worker restart mid-phase", async () => {
     const mock = await loopMock();
     mock.mockClear();
-    mock.mockImplementation(async () => ({ cycles: 3, frames: 300, reconnects: 0, ended: "until" as const, missed: [] }));
+    mock.mockImplementation(async () => ({ cycles: 3, frames: 300, reconnects: 0, ended: "until" as const, missed: [], direct: 0 }));
 
     const recTag = seedRecordedCue("Resume tag");
     setSetting("drillPreambleCueId", recTag);
